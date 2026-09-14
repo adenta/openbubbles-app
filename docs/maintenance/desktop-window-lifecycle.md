@@ -10,7 +10,9 @@ also lost.
 
 `DesktopLifecycle` now owns the window listener, tray initialization, and tray
 callbacks above the application Navigator. Replacing a route leaves them
-attached; disposing the app root removes them. Close to Tray still hides the
+attached; disposing the app root removes them. The initialization-error screen
+also mounts these controls so a startup failure does not trap the window.
+Close to Tray still hides the
 window and preserves background messaging, while the tray's Close App action
 disables close prevention and requests an actual quit. The initial tray menu
 uses `window_manager`'s visibility query because the pinned Bitsdojo Linux

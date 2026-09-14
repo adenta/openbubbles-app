@@ -208,7 +208,10 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
           darkTheme: dark,
         ));
       } else {
-        runApp(FailureToStart(e: exception, s: stacktrace));
+        final failure = FailureToStart(e: exception, s: stacktrace);
+        runApp(kIsDesktop
+            ? DesktopLifecycle(windowListener: DesktopWindowListener.instance, child: failure)
+            : failure);
         throw Exception("$exception $stacktrace");
       }
     },
