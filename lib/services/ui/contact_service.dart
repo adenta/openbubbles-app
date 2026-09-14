@@ -60,7 +60,7 @@ class ContactsService extends GetxService {
         return await _refreshCardDavContacts();
       } catch (error) {
         // Network exceptions can contain credentials, resource URLs and vCards.
-        Logger.warn('Contact sync failed (${error.runtimeType}); retry is safe');
+        Logger.warn('Contact sync failed (${contactSyncFailureSummary(error)}); retry is safe');
         throw StateError('Contact sync failed; please retry');
       }
     }
@@ -425,7 +425,7 @@ class ContactsService extends GetxService {
           } else {
             final incoming = change.contact!;
             if (incoming.id != id || incoming.isShared || (existing?.isShared ?? false)) {
-              throw StateError('Invalid imported contact identity');
+              throw ContactSyncError(ContactSyncFailure.importedIdentity);
             }
             incoming.dbId = existing?.dbId;
             incoming.isDismissed = existing?.isDismissed ?? false;

@@ -87,6 +87,15 @@ const card =
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('failure summaries retain safe categories without private exception details', () {
+    expect(contactSyncFailureSummary(ContactSyncError(ContactSyncFailure.cardDownload, 403)),
+        'cardDownload; HTTP 403');
+    expect(contactSyncFailureSummary(StateError('private-contact-url')), 'StateError');
+    expect(contactSyncFailureSummary(DioException(
+      requestOptions: RequestOptions(path: 'https://private.invalid/contact'),
+      message: 'private-contact-card',
+      type: DioExceptionType.badResponse)), 'network badResponse; HTTP 0');
+  });
   late Directory scratch;
   late TestContacts service;
   late StubClient client;

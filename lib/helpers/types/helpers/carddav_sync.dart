@@ -8,6 +8,29 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:bluebubbles/database/io/contact.dart' as contacts;
 import 'package:bluebubbles/database/global/structured_name.dart' as structured;
 
+enum ContactSyncFailure {
+  tokenPersistence, ctagPersistence, missingAuthentication, discovery,
+  resourceStatus, cardDownload, missingCard, invalidCard, photoDownload, invalidPhoto,
+  importedIdentity,
+}
+
+/// Only fixed categories and numeric HTTP status are safe to include in logs.
+class ContactSyncError extends StateError {
+  final ContactSyncFailure reason;
+  final int? status;
+  ContactSyncError(this.reason, [this.status]) : super(reason.name);
+}
+
+String contactSyncFailureSummary(Object error) {
+  if (error is ContactSyncError) {
+    return '${error.reason.name}${error.status == null ? "" : "; HTTP ${error.status}"}';
+  }
+  if (error is DioException) {
+    return 'network ${error.type.name}; HTTP ${error.response?.statusCode ?? 0}';
+  }
+  return error.runtimeType.toString();
+}
+
 /// ===== Models =====
 
 class AddressBook {
@@ -93,10 +116,10 @@ class SettingsCardDavStateStore implements CardDavStateStore {
     // Write the token first: a crash before the CTag write can replay changes,
     // but cannot skip changes whose records have not yet been committed.
     if (!await ss.prefs.setString('tokens', jsonEncode(tokens))) {
-      throw StateError('Could not persist contact sync token');
+      throw ContactSyncError(ContactSyncFailure.tokenPersistence);
     }
     if (!await ss.prefs.setString('ctags', jsonEncode(ctags))) {
-      throw StateError('Could not persist contact sync CTag');
+      throw ContactSyncError(ContactSyncFailure.ctagPersistence);
     }
     ss.settings.tokens.value = tokens;
     ss.settings.ctags.value = ctags;
@@ -131,7 +154,7 @@ class CardDavClient {
   })  : _authHeadersProvider = authHeadersProvider ??
             (() async {
               if (username == null || password == null) {
-                throw StateError('Auth headers provider not set and username/password not provided');
+                throw ContactSyncError(ContactSyncFailure.missingAuthentication);
               }
               return {
                 'Authorization': 'Basic ${base64Encode(utf8.encode('$username:$password'))}',
@@ -193,7 +216,7 @@ class CardDavClient {
       }
     }
     if (homeSet == null) {
-      throw StateError('Could not discover addressbook-home-set from principal: $principalUrl');
+      throw ContactSyncError(ContactSyncFailure.discovery);
     }
     final books = await _listAddressBooks(homeSet);
     return books;
@@ -461,7 +484,7 @@ class CardDavClient {
       final statuses = r.findAllElements('status', namespace: 'DAV:').map((e) => e.innerText).toList();
       final deleted = statuses.any((s) => s.contains(' 404 ') || s.contains(' 410 '));
       if (!deleted && statuses.any((s) => !s.contains(' 200 '))) {
-        throw StateError('CardDAV resource sync failed');
+        throw ContactSyncError(ContactSyncFailure.resourceStatus);
       }
 
       String? etag;
@@ -537,15 +560,15 @@ class CardDavClient {
     if (res.statusCode != null && res.statusCode! >= 200 && res.statusCode! < 300) {
       final data = res.data;
       if (data is String) return data;
-      throw const FormatException('Missing contact card');
+      throw ContactSyncError(ContactSyncFailure.missingCard);
     }
     if (res.statusCode == 404 || res.statusCode == 410) return null;
-    throw StateError('Contact download failed (HTTP ${res.statusCode})');
+    throw ContactSyncError(ContactSyncFailure.cardDownload, res.statusCode);
   }
 
   Future<contacts.Contact> _myContactFromVCard(String vcard, Uri href) async {
     if (!vcard.contains('BEGIN:VCARD') || !vcard.contains('END:VCARD')) {
-      throw const FormatException('Invalid contact card');
+      throw ContactSyncError(ContactSyncFailure.invalidCard);
     }
     final contact = Contact.fromVCard(vcard);
     contact.id = cardDavContactId(href);
@@ -625,10 +648,10 @@ class CardDavClient {
       final data = res.data;
       if (data is Uint8List) return data;
       if (data is List<int>) return Uint8List.fromList(data);
-      throw const FormatException('Invalid contact photo');
+      throw ContactSyncError(ContactSyncFailure.invalidPhoto);
     }
     if (res.statusCode == 404 || res.statusCode == 410) return null;
-    throw StateError('Contact photo download failed (HTTP ${res.statusCode})');
+    throw ContactSyncError(ContactSyncFailure.photoDownload, res.statusCode);
   }
 
   Future<List<T>> _mapWithConcurrency<T>(
