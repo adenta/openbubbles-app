@@ -141,7 +141,7 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
           final savedWindowWidth = ss.prefs.getDouble("window-width");
           final savedWindowHeight = ss.prefs.getDouble("window-height");
           windowManager.addListener(DesktopWindowListener.instance);
-          doWhenWindowReady(() async {
+          Future<void> configureDesktopWindow() async {
             await windowManager.setMinimumSize(const Size(300, 300));
             Display primary = await ScreenRetriever.instance.getPrimaryDisplay();
 
@@ -151,6 +151,7 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
 
             width = width.clamp(300, max(300, primary.size.width));
             height = height.clamp(300, max(300, primary.size.height));
+            Logger.info("Restoring desktop window size: ${width}x$height");
             await windowManager.setSize(Size(width, height));
             await ss.prefs.setDouble("window-width", width);
             await ss.prefs.setDouble("window-height", height);
@@ -175,7 +176,16 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
               chats.init();
               socket;
             }
-          });
+          }
+          if (Platform.isLinux) {
+            // The pinned bitsdojo rasterization-ready future does not complete
+            // in our Wayland release session. GTK is ready after the UI frame.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              configureDesktopWindow();
+            });
+          } else {
+            doWhenWindowReady(configureDesktopWindow);
+          }
 
         }
         await dotenv.load(fileName: '.env', isOptional: true);
