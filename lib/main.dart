@@ -18,6 +18,7 @@ import 'package:bluebubbles/app/layouts/startup/failure_to_start.dart';
 import 'package:bluebubbles/app/layouts/setup/setup_view.dart';
 import 'package:bluebubbles/app/layouts/startup/splash_screen.dart';
 import 'package:bluebubbles/app/wrappers/titlebar_wrapper.dart';
+import 'package:bluebubbles/app/wrappers/desktop_lifecycle.dart';
 import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
@@ -38,14 +39,11 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:local_notifier/local_notifier.dart';
 import 'package:path/path.dart' show join;
-import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:secure_application/secure_application.dart';
-import 'package:system_tray/system_tray.dart' as st;
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
-import 'package:tray_manager/tray_manager.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:universal_io/io.dart';
 import 'package:window_manager/window_manager.dart';
@@ -53,7 +51,6 @@ import 'package:windows_taskbar/windows_taskbar.dart';
 
 const usingRustPush = true;
 bool isAuthing = false;
-final systemTray = st.SystemTray();
 
 @pragma('vm:entry-point')
 //ignore: prefer_void_to_null
@@ -140,7 +137,6 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
           // Capture saved dimensions before GTK's initial resize events arrive.
           final savedWindowWidth = ss.prefs.getDouble("window-width");
           final savedWindowHeight = ss.prefs.getDouble("window-height");
-          windowManager.addListener(DesktopWindowListener.instance);
           Future<void> configureDesktopWindow() async {
             await windowManager.setMinimumSize(const Size(300, 300));
             Display primary = await ScreenRetriever.instance.getPrimaryDisplay();
@@ -290,7 +286,7 @@ class Main extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveTheme(
+    final app = AdaptiveTheme(
       light: lightTheme.copyWith(
           textSelectionTheme: TextSelectionThemeData(selectionColor: lightTheme.colorScheme.primary)),
       dark:
@@ -446,6 +442,10 @@ class Main extends StatelessWidget {
         defaultTransition: Transition.cupertino,
       ),
     );
+    // Keep desktop controls alive when setup or another route is replaced.
+    return kIsDesktop
+        ? DesktopLifecycle(windowListener: DesktopWindowListener.instance, child: app)
+        : app;
   }
 }
 
@@ -456,7 +456,7 @@ class Home extends StatefulWidget {
   State<Home> createState() => _HomeState();
 }
 
-class _HomeState extends OptimizedState<Home> with WidgetsBindingObserver, TrayListener {
+class _HomeState extends OptimizedState<Home> with WidgetsBindingObserver {
   final ReceivePort port = ReceivePort();
   bool serverCompatible = true;
   bool fullyLoaded = false;
@@ -536,20 +536,6 @@ class _HomeState extends OptimizedState<Home> with WidgetsBindingObserver, TrayL
           Future(() => eventDispatcher.emit("theme-update", null));
         }
 
-        /* ----- SYSTEM TRAY INITIALIZATION ----- */
-        await initSystemTray();
-        if (Platform.isWindows) {
-          systemTray.registerSystemTrayEventHandler((eventName) {
-            if (eventName == st.kSystemTrayEventClick) {
-              onTrayIconMouseDown();
-            } else if (eventName == st.kSystemTrayEventRightClick) {
-              onTrayIconRightMouseDown();
-            }
-          });
-        } else {
-          trayManager.addListener(this);
-        }
-
         /* ----- NOTIFICATIONS INITIALIZATION ----- */
         await localNotifier.setup(appName: Platform.isLinux ? "OpenBubbles Dev" : "BlueBubbles");
       }
@@ -565,45 +551,9 @@ class _HomeState extends OptimizedState<Home> with WidgetsBindingObserver, TrayL
   }
 
   @override
-  void onTrayIconMouseDown() async {
-    await windowManager.show();
-  }
-
-  @override
-  void onTrayIconRightMouseDown() async {
-    if (Platform.isWindows) {
-      await systemTray.popUpContextMenu();
-    } else {
-      await trayManager.popUpContextMenu();
-    }
-  }
-
-  @override
-  void onTrayMenuItemClick(MenuItem menuItem) async {
-    switch (menuItem.key) {
-      case 'show_app':
-        await windowManager.show();
-        break;
-      case 'hide_app':
-        await windowManager.hide();
-        break;
-      case 'close_app':
-        if (await windowManager.isPreventClose()) {
-          await windowManager.setPreventClose(false);
-        }
-        await windowManager.close();
-        break;
-    }
-  }
-
-  @override
   void dispose() {
-    // Clean up observer when app is fully closed
+    // This route can be removed after setup or other navigation.
     WidgetsBinding.instance.removeObserver(this);
-    windowManager.removeListener(DesktopWindowListener.instance);
-    if (Platform.isLinux) {
-      trayManager.removeListener(this);
-    }
     super.dispose();
   }
 
@@ -680,74 +630,5 @@ class _HomeState extends OptimizedState<Home> with WidgetsBindingObserver, TrayL
             )),
       ),
     );
-  }
-}
-
-Future<void> initSystemTray() async {
-  if (Platform.isWindows) {
-    await systemTray.initSystemTray(
-      iconPath: 'assets/icon/icon.ico',
-      toolTip: "OpenBubbles",
-    );
-  } else {
-    String path;
-    if (isFlatpak) {
-      path = 'app.bluebubbles.BlueBubbles';
-    } else if (isSnap || Platform.isLinux) {
-      path = p.joinAll([p.dirname(Platform.resolvedExecutable), 'data/flutter_assets/assets/icon', 'icon.png']);
-    } else {
-      path = 'assets/icon/icon.png';
-    }
-
-    if (Platform.isLinux) {
-      // The pinned plugin otherwise generates a new short ID on every launch.
-      // Supply a stable, D-Bus-safe ID and the absolute packaged icon path.
-      await const MethodChannel('tray_manager').invokeMethod('setIcon', {
-        'id': 'app_openbubbles_Dev',
-        'iconPath': path,
-      });
-    } else {
-      await trayManager.setIcon(path);
-    }
-  }
-
-  await setSystemTrayContextMenu(windowHidden: !appWindow.isVisible);
-}
-
-Future<void> setSystemTrayContextMenu({bool windowHidden = false}) async {
-  if (Platform.isWindows) {
-    st.Menu menu = st.Menu();
-    menu.buildFrom([
-      st.MenuItemLabel(
-        label: windowHidden ? 'Show App' : 'Hide App',
-        onClicked: (st.MenuItemBase menuItem) async {
-          if (windowHidden) {
-            await windowManager.show();
-          } else {
-            await windowManager.hide();
-          }
-        },
-      ),
-      st.MenuSeparator(),
-      st.MenuItemLabel(
-        label: 'Close App',
-        onClicked: (_) async {
-          if (await windowManager.isPreventClose()) {
-            await windowManager.setPreventClose(false);
-          }
-          await windowManager.close();
-        },
-      ),
-    ]);
-
-    await systemTray.setContextMenu(menu);
-  } else {
-    await trayManager.setContextMenu(Menu(
-      items: [
-        MenuItem(label: windowHidden ? 'Show App' : 'Hide App', key: windowHidden ? 'show_app' : 'hide_app'),
-        MenuItem.separator(),
-        MenuItem(label: 'Close App', key: 'close_app'),
-      ],
-    ));
   }
 }
