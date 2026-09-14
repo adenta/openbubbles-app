@@ -7,12 +7,10 @@ import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_acrylic/window_effect.dart';
 import 'package:get/get.dart' hide Response;
 import 'package:slugify/slugify.dart';
-import 'package:supercharged/supercharged.dart';
 
 class ContactSelectorView extends StatefulWidget {
   const ContactSelectorView({
@@ -34,6 +32,17 @@ class ContactSelectorViewState extends OptimizedState<ContactSelectorView> {
   List<Contact> filteredContacts = [];
   String? oldSearch;
   Timer? _debounce;
+  StreamSubscription? _contactsSubscription;
+
+  void _refreshFilteredContacts() {
+    if (!mounted) return;
+    final query = slugify(searchController.text, delimiter: "");
+    setState(() {
+      filteredContacts = cs.contacts.where((contact) =>
+          slugify(contact.displayName, delimiter: "").contains(query) ||
+          contact.hasMatchingAddress(query)).toList();
+    });
+  }
 
   @override
   void initState() {
@@ -42,23 +51,28 @@ class ContactSelectorViewState extends OptimizedState<ContactSelectorView> {
     // Handle searching for a contact
     searchController.addListener(() {
       _debounce?.cancel();
-      _debounce = Timer(const Duration(milliseconds: 250), () async {
-        final searchContacts = await SchedulerBinding.instance.scheduleTask(() async {
-          final query = slugify(searchController.text, delimiter: "");
-          return cs.contacts.filter((element) =>
-              slugify(element.displayName, delimiter: "").contains(query) || element.hasMatchingAddress(query));
-        }, Priority.animation);
-
+      _debounce = Timer(const Duration(milliseconds: 250), () {
         _debounce = null;
-        setState(() {
-          filteredContacts = List<Contact>.from(searchContacts);
-        });
+        _refreshFilteredContacts();
       });
+    });
+    _contactsSubscription = eventDispatcher.stream.listen((event) {
+      if (event.item1 == 'update-contacts') _refreshFilteredContacts();
     });
 
     setState(() {
       filteredContacts = List<Contact>.from(cs.contacts);
     });
+  }
+
+  @override
+  void dispose() {
+    _contactsSubscription?.cancel();
+    _debounce?.cancel();
+    searchController.dispose();
+    searchNode.dispose();
+    addressScrollController.dispose();
+    super.dispose();
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:synchronized/synchronized.dart';
 
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/database/database.dart';
@@ -24,6 +25,7 @@ class ContactsService extends GetxService {
   List<Contact> contacts = [];
 
   bool _hasContactAccess = false;
+  final Lock _refreshLock = Lock();
 
   Future<bool> get hasContactAccess async {
     if (_hasContactAccess) return true;
@@ -39,7 +41,7 @@ class ContactsService extends GetxService {
     if (!kIsWeb) {
       contacts = Contact.getContacts();
     } else {
-      await fetchNetworkContacts();
+      await refreshContacts();
     }
   }
 
@@ -52,7 +54,20 @@ class ContactsService extends GetxService {
     }
   }
 
-  Future<List<List<int>>> refreshContacts() async {
+  Future<List<List<int>>> refreshContacts() => _refreshLock.synchronized(() async {
+    if ((kIsDesktop || kIsWeb) && usingRustPush) {
+      try {
+        return await _refreshCardDavContacts();
+      } catch (error) {
+        // Network exceptions can contain credentials, resource URLs and vCards.
+        Logger.warn('Contact sync failed (${error.runtimeType}); retry is safe');
+        throw StateError('Contact sync failed; please retry');
+      }
+    }
+    return _refreshLegacyContacts();
+  });
+
+  Future<List<List<int>>> _refreshLegacyContacts() async {
     if (!(await hasContactAccess)) return [];
 
     // Check if the user is on v1.5.2 or newer
@@ -212,11 +227,11 @@ class ContactsService extends GetxService {
   }
 
   void completeContactsRefresh(List<Contact> refreshedContacts, {List<List<int>>? reloadUI}) {
-    if (refreshedContacts.isNotEmpty) {
-      contacts = refreshedContacts;
-      if (reloadUI != null) {
-        eventDispatcher.emit('update-contacts', reloadUI);
-      }
+    // Legacy/mobile callers use an empty list to mean "no changes".
+    if (refreshedContacts.isEmpty && !((kIsDesktop || kIsWeb) && usingRustPush)) return;
+    contacts = List<Contact>.from(refreshedContacts);
+    if (reloadUI != null) {
+      eventDispatcher.emit('update-contacts', reloadUI);
     }
   }
 
@@ -294,90 +309,157 @@ class ContactsService extends GetxService {
     return matchHandleToContact(tempHandle);
   }
 
+  /// Authentication stays with the existing provider; tests supply a synthetic client.
+  Future<CardDavClient?> createCardDavClient() async {
+    final CardDavClient client;
+
+    if (ss.settings.contactSyncProvider.value == "Google") {
+      var account = await pushService.googleSignIn.signInOffline();
+      if (account == null) {
+        Logger.warn("No google auth!");
+        return null;
+      }
+
+      final response = await http.dio.post(
+        'https://oauth2.googleapis.com/token',
+        data: {
+          'client_id': clientId,
+          'client_secret': clientSecret,
+          'refresh_token': account.refreshToken,
+          'grant_type': 'refresh_token',
+        },
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          responseType: ResponseType.json,
+        ),
+      );
+
+      if (response.statusCode != 200) {
+        throw DioException(
+          requestOptions: response.requestOptions,
+          response: response,
+          message: 'Failed to refresh Google access token',
+          type: DioExceptionType.badResponse,
+        );
+      }
+
+      client = CardDavClient(
+        principalUrl: Uri.parse('https://www.googleapis.com/.well-known/carddav'),
+        authHeadersProvider: () async {
+          return {
+            "Authorization": "Bearer ${response.data['access_token'] as String}"
+          };
+        },
+        state: SettingsCardDavStateStore(),
+      );
+    } else if (ss.settings.contactSyncProvider.value == "CardDav") {
+      if (ss.settings.cardDavServer.value == "") return null;
+      client = CardDavClient(
+        principalUrl: Uri.parse(ss.settings.cardDavServer.value),
+        username: ss.settings.cardDavUser.value,
+        password: ss.settings.cardDavPass.value,
+        state: SettingsCardDavStateStore(),
+      );
+    } else {
+      if (pushService.state?.icloudServices == null) return null;
+      client = CardDavClient(
+        principalUrl: Uri.parse('https://contacts.icloud.com/'),
+        authHeadersProvider: () async {
+          return await api.getContactsHeaders(path: pushService.statePath, state: pushService.state!.anisette, tokenProvider: pushService.state!.icloudServices!.tokenProvider, config: pushService.state!.osConfig);
+        },
+        state: SettingsCardDavStateStore(),
+      );
+    }
+
+    return client;
+  }
+
+  Future<List<List<int>>> _refreshCardDavContacts() async {
+    if (!(await hasContactAccess)) return [];
+    final watch = Stopwatch()..start();
+    final client = await createCardDavClient();
+    final results = client == null ? <CardDavSyncResult>[] : await client.syncAllAddressBooks();
+    final changed = applyCardDavChanges(results);
+    // Publish committed records even if saving a checkpoint subsequently fails.
+    completeContactsRefresh(kIsWeb ? contacts : Contact.getContacts(), reloadUI: changed);
+    if (client != null) {
+      for (final result in results.where((r) => r.hasCheckpoint)) {
+        await client.state.saveCheckpoint(result.book);
+      }
+    }
+    Logger.info('Contact sync ${client == null ? "unavailable; using cache" : "completed"}: '
+        '${contacts.length} contacts, ${changed.first.length} changed, '
+        '${changed.last.length} relinked, ${watch.elapsedMilliseconds} ms');
+    return changed;
+  }
+
+  /// Contacts and handle links commit together. No network or preferences writes here.
+  List<List<int>> applyCardDavChanges(List<CardDavSyncResult> results) {
+    List<List<int>> apply() {
+      final changedContacts = <int>{};
+      final changedHandles = <int>{};
+      // ObjectBox clears incoming relations when a target is deleted. Capture
+      // their old values first so the UI still receives those link changes.
+      final originalHandles = kIsWeb ? chats.webCachedHandles : Database.handles.getAll();
+      final originalLinks = {
+        for (final h in originalHandles)
+          h.id: kIsWeb ? h.webContact?.id : h.contactRelation.targetId,
+      };
+      final stored = kIsWeb ? List<Contact>.from(contacts) : Contact.getContacts();
+      final byId = {for (final c in stored) c.id: c};
+      for (final result in results) {
+        for (final change in result.changes) {
+          final id = cardDavContactId(change.href);
+          final existing = byId[id];
+          if (change.type == ChangeType.deleted) {
+            if (existing == null || existing.isShared) continue;
+            if (existing.dbId != null) changedContacts.add(existing.dbId!);
+            if (!kIsWeb) Database.contacts.remove(existing.dbId!);
+            byId.remove(id);
+          } else {
+            final incoming = change.contact!;
+            if (incoming.id != id || incoming.isShared || (existing?.isShared ?? false)) {
+              throw StateError('Invalid imported contact identity');
+            }
+            incoming.dbId = existing?.dbId;
+            incoming.isDismissed = existing?.isDismissed ?? false;
+            incoming.posterPath = existing?.posterPath;
+            // Put by stable ID directly; Contact.save's legacy lookup is not needed.
+            if (!kIsWeb) incoming.dbId = Database.contacts.put(incoming);
+            if (incoming.dbId != null) changedContacts.add(incoming.dbId!);
+            byId[id] = incoming;
+          }
+        }
+      }
+      final allContacts = kIsWeb ? byId.values.toList() : Contact.getContacts();
+      final handles = kIsWeb ? chats.webCachedHandles : Database.handles.getAll();
+      for (final handle in handles) {
+        final oldId = originalLinks[handle.id];
+        final candidates = allContacts.where((c) => matchContactToHandles(c, [handle]).isNotEmpty).toList();
+        final normal = candidates.where((c) => !c.isShared).toList();
+        final preferred = normal.isNotEmpty ? normal : candidates;
+        final match = preferred.firstWhereOrNull((c) => (kIsWeb ? c.id : c.dbId) == oldId) ?? preferred.firstOrNull;
+        if (kIsWeb) {
+          handle.webContact = match;
+          if (oldId != match?.id && handle.id != null) changedHandles.add(handle.id!);
+        } else {
+          handle.contactRelation.target = match;
+          if (oldId != handle.contactRelation.targetId) changedHandles.add(handle.id!);
+        }
+      }
+      if (!kIsWeb) Database.handles.putMany(handles);
+      if (kIsWeb) contacts = allContacts;
+      return [changedContacts.toList(), changedHandles.toList()];
+    }
+    return kIsWeb ? apply() : Database.runInTransaction(TxMode.write, apply);
+  }
+
   Future<List<Contact>> fetchNetworkContacts({Function(String)? logger}) async {
     final networkContacts = <Contact>[];
 
     if (usingRustPush) {
-      final CardDavClient client;
-
-      if (ss.settings.contactSyncProvider.value == "Google") {
-        var account = await pushService.googleSignIn.signInOffline();
-        if (account == null) {
-          Logger.warn("No google auth!");
-          return [];
-        }
-
-        final response = await http.dio.post(
-          'https://oauth2.googleapis.com/token',
-          data: {
-            'client_id': clientId,
-            'client_secret': clientSecret,
-            'refresh_token': account.refreshToken,
-            'grant_type': 'refresh_token',
-          },
-          options: Options(
-            contentType: Headers.formUrlEncodedContentType,
-            responseType: ResponseType.json,
-          ),
-        );
-
-        if (response.statusCode != 200) {
-          throw DioException(
-            requestOptions: response.requestOptions,
-            response: response,
-            message: 'Failed to refresh Google access token',
-            type: DioExceptionType.badResponse,
-          );
-        }
-
-        client = CardDavClient(
-          principalUrl: Uri.parse('https://www.googleapis.com/.well-known/carddav'),
-          authHeadersProvider: () async {
-            return {
-              "Authorization": "Bearer ${response.data['access_token'] as String}"
-            };
-          },
-          state: MemoryStateStore(),
-        );
-      } else if (ss.settings.contactSyncProvider.value == "CardDav") {
-        if (ss.settings.cardDavServer.value == "") return [];
-        client = CardDavClient(
-          principalUrl: Uri.parse(ss.settings.cardDavServer.value),
-          username: ss.settings.cardDavUser.value,
-          password: ss.settings.cardDavPass.value,
-          state: MemoryStateStore(),
-        );
-      } else {
-        if (pushService.state?.icloudServices == null) return [];
-        client = CardDavClient(
-          principalUrl: Uri.parse('https://contacts.icloud.com/'),
-          authHeadersProvider: () async {
-            return await api.getContactsHeaders(path: pushService.statePath, state: pushService.state!.anisette, tokenProvider: pushService.state!.icloudServices!.tokenProvider, config: pushService.state!.osConfig);
-          },
-          state: MemoryStateStore(),
-        );
-      }
-
-      final synced = await client.syncAllAddressBooks();
-
-      for (final entry in synced.entries) {
-        final book = entry.key;
-        final changes = entry.value;
-
-        print('AddressBook: ${book.displayName ?? book.url}');
-        print('Changes: ${changes.length}');
-        for (final ch in changes) {
-          if (ch.type == ChangeType.upsert) {
-            if (ch.contact != null) networkContacts.add(ch.contact!);
-            // Parse/store vCard as you like
-            print(
-                '  UPSERT ${ch.href} etag=${ch.etag} vcardLen=${ch.vcard?.length} contact=${ch.contact?.toMap()}');
-          } else {
-            print('  DELETE ${ch.href}');
-          }
-        }
-      }
-      return networkContacts;
+      await refreshContacts();
+      return List<Contact>.from(contacts);
     }
 
     // refresh UI on web without waiting for avatars

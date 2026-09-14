@@ -4,12 +4,9 @@ import 'dart:typed_data';
 import 'package:bluebubbles/services/services.dart';
 import 'package:dio/dio.dart';
 import 'package:xml/xml.dart';
-import 'package:dio/io.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:bluebubbles/database/io/contact.dart' as contacts;
 import 'package:bluebubbles/database/global/structured_name.dart' as structured;
-
-// 690 lines of beautiful AI slop. It works great!
 
 /// ===== Models =====
 
@@ -36,7 +33,18 @@ class AddressBook {
   }
 
   @override
-  String toString() => 'AddressBook(url=$url, name=$displayName, ctag=$ctag, token=$syncToken)';
+  String toString() => 'AddressBook';
+}
+
+String cardDavContactId(Uri href) => 'carddav:${href.normalizePath()}';
+
+/// Downloaded changes and a proposed checkpoint. Fetching never commits state.
+class CardDavSyncResult {
+  final AddressBook book;
+  final List<ContactChange> changes;
+  final bool hasCheckpoint;
+
+  CardDavSyncResult(this.book, this.changes, {this.hasCheckpoint = true});
 }
 
 enum ChangeType { upsert, deleted }
@@ -58,39 +66,40 @@ class ContactChange {
 
   @override
   String toString() =>
-      'ContactChange($type, href=$href, etag=$etag, vcardLen=${vcard?.length}, contact=${contact?.displayName})';
+      'ContactChange($type)';
 }
 
-/// ===== Persistence hooks (you implement) =====
-/// Store per-addressbook CTag and sync-token somewhere (db/shared_prefs/etc).
+/// Per-address-book checkpoints, persisted after committing the contact changes.
 abstract class CardDavStateStore {
   Future<String?> getCtag(Uri addressBookUrl);
-  Future<void> setCtag(Uri addressBookUrl, String? ctag);
-
   Future<String?> getSyncToken(Uri addressBookUrl);
-  Future<void> setSyncToken(Uri addressBookUrl, String? syncToken);
+  Future<void> saveCheckpoint(AddressBook book);
 }
 
-/// Simple in-memory store (for demo/testing).
-class MemoryStateStore implements CardDavStateStore {
+/// Persists checkpoints only after the caller commits contact records.
+class SettingsCardDavStateStore implements CardDavStateStore {
   String _k(Uri u) => u.toString();
 
   @override
   Future<String?> getCtag(Uri addressBookUrl) async => ss.settings.ctags[_k(addressBookUrl)];
 
   @override
-  Future<void> setCtag(Uri addressBookUrl, String? ctag) async {
-    ss.settings.ctags[_k(addressBookUrl)] = ctag;
-    ss.saveSettings();
-  }
-
-  @override
   Future<String?> getSyncToken(Uri addressBookUrl) async => ss.settings.tokens[_k(addressBookUrl)];
 
   @override
-  Future<void> setSyncToken(Uri addressBookUrl, String? syncToken) async {
-    ss.settings.tokens[_k(addressBookUrl)] = syncToken;
-    ss.saveSettings();
+  Future<void> saveCheckpoint(AddressBook book) async {
+    final tokens = Map<String, String?>.from(ss.settings.tokens)..[_k(book.url)] = book.syncToken;
+    final ctags = Map<String, String?>.from(ss.settings.ctags)..[_k(book.url)] = book.ctag;
+    // Write the token first: a crash before the CTag write can replay changes,
+    // but cannot skip changes whose records have not yet been committed.
+    if (!await ss.prefs.setString('tokens', jsonEncode(tokens))) {
+      throw StateError('Could not persist contact sync token');
+    }
+    if (!await ss.prefs.setString('ctags', jsonEncode(ctags))) {
+      throw StateError('Could not persist contact sync CTag');
+    }
+    ss.settings.tokens.value = tokens;
+    ss.settings.ctags.value = ctags;
   }
 }
 
@@ -162,13 +171,12 @@ class CardDavClient {
   /// Public entry point:
   /// - discover address books
   /// - for each address book: compare CTag, and if changed run incremental sync and download vcards
-  Future<Map<AddressBook, List<ContactChange>>> syncAllAddressBooks() async {
+  Future<List<CardDavSyncResult>> syncAllAddressBooks() async {
     final books = await discoverAddressBooks();
-    final result = <AddressBook, List<ContactChange>>{};
+    final result = <CardDavSyncResult>[];
 
     for (final book in books) {
-      final changes = await syncAddressBook(book);
-      result[book] = changes;
+      result.add(await syncAddressBook(book));
     }
     return result;
   }
@@ -196,8 +204,8 @@ class CardDavClient {
   /// - if CTag unchanged: return []
   /// - else: REPORT sync-collection using stored sync-token (if any)
   /// - download changed/new vcards via GET
-  /// - update stored CTag + sync-token
-  Future<List<ContactChange>> syncAddressBook(AddressBook book) async {
+  /// - return a proposed CTag + sync-token for the caller to commit after its data
+  Future<CardDavSyncResult> syncAddressBook(AddressBook book) async {
     // Refresh CTag and (optionally) a sync-token property.
     final refreshed = await _fetchAddressBookProps(book.url);
     final currentCtag = refreshed.ctag;
@@ -205,7 +213,7 @@ class CardDavClient {
 
     // If server provides CTag and it’s unchanged, nothing to do.
     if (currentCtag != null && storedCtag != null && currentCtag == storedCtag) {
-      return const <ContactChange>[];
+      return CardDavSyncResult(refreshed, const [], hasCheckpoint: false);
     }
 
     // Run incremental sync via sync-collection (RFC 6578)
@@ -240,11 +248,8 @@ class CardDavClient {
       changes.addAll(upsertChanges.whereType<ContactChange>());
     }
 
-    // Persist new token + ctag
-    await state.setSyncToken(book.url, syncResult.newSyncToken);
-    await state.setCtag(book.url, currentCtag);
-
-    return changes;
+    return CardDavSyncResult(AddressBook(url: book.url,
+        ctag: currentCtag, syncToken: syncResult.newSyncToken), changes);
   }
 
   /// ===== Discovery helpers =====
@@ -455,6 +460,9 @@ class CardDavClient {
       // Some servers use 410, or put status inside propstat.
       final statuses = r.findAllElements('status', namespace: 'DAV:').map((e) => e.innerText).toList();
       final deleted = statuses.any((s) => s.contains(' 404 ') || s.contains(' 410 '));
+      if (!deleted && statuses.any((s) => !s.contains(' 200 '))) {
+        throw StateError('CardDAV resource sync failed');
+      }
 
       String? etag;
       if (!deleted) {
@@ -462,7 +470,7 @@ class CardDavClient {
             .findAllElements('getetag', namespace: 'DAV:')
             .map((e) => e.innerText.trim())
             .firstWhere((t) => t.isNotEmpty, orElse: () => '');
-        if (etag != null && etag.isEmpty) etag = null;
+        if (etag.isEmpty) etag = null;
       }
 
       items.add(_SyncItem(href: href, etag: etag, deleted: deleted));
@@ -529,13 +537,18 @@ class CardDavClient {
     if (res.statusCode != null && res.statusCode! >= 200 && res.statusCode! < 300) {
       final data = res.data;
       if (data is String) return data;
-      return data?.toString();
+      throw const FormatException('Missing contact card');
     }
-    return null;
+    if (res.statusCode == 404 || res.statusCode == 410) return null;
+    throw StateError('Contact download failed (HTTP ${res.statusCode})');
   }
 
   Future<contacts.Contact> _myContactFromVCard(String vcard, Uri href) async {
+    if (!vcard.contains('BEGIN:VCARD') || !vcard.contains('END:VCARD')) {
+      throw const FormatException('Invalid contact card');
+    }
     final contact = Contact.fromVCard(vcard);
+    contact.id = cardDavContactId(href);
     final inlinePhoto = _extractInlinePhotoBytes(vcard);
     if (inlinePhoto != null && inlinePhoto.isNotEmpty) {
       contact.photo = inlinePhoto;
@@ -612,8 +625,10 @@ class CardDavClient {
       final data = res.data;
       if (data is Uint8List) return data;
       if (data is List<int>) return Uint8List.fromList(data);
+      throw const FormatException('Invalid contact photo');
     }
-    return null;
+    if (res.statusCode == 404 || res.statusCode == 410) return null;
+    throw StateError('Contact photo download failed (HTTP ${res.statusCode})');
   }
 
   Future<List<T>> _mapWithConcurrency<T>(

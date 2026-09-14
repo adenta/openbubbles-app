@@ -97,7 +97,10 @@ class SyncService extends GetxService {
       }
       isolate?.kill();
     }
-    cs.completeContactsRefresh(contacts, reloadUI: result);
+    // Desktop CardDAV refresh already publishes its committed, complete list.
+    if (!((kIsDesktop || kIsWeb) && usingRustPush)) {
+      cs.completeContactsRefresh(contacts, reloadUI: result);
+    }
 
     isIncrementalSyncing.value = false;
   }
