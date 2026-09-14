@@ -150,7 +150,7 @@ class CupertinoHeader extends StatelessWidget implements PreferredSizeWidget {
                             borderRadius: BorderRadius.circular(10),
                             child: Padding(
                               padding: const EdgeInsets.all(3.0),
-                              child: _ChatIconAndTitle(parentController: controller),
+                              child: CupertinoConversationTitle(parentController: controller),
                             ),
                           ),
                         ),
@@ -440,14 +440,14 @@ class _UnreadIconState extends OptimizedState<_UnreadIcon> {
   }
 }
 
-class _ChatIconAndTitle extends CustomStateful<ConversationViewController> {
-  const _ChatIconAndTitle({required super.parentController});
+class CupertinoConversationTitle extends CustomStateful<ConversationViewController> {
+  const CupertinoConversationTitle({required super.parentController});
 
   @override
-  State<StatefulWidget> createState() => _ChatIconAndTitleState();
+  State<StatefulWidget> createState() => _CupertinoConversationTitleState();
 }
 
-class _ChatIconAndTitleState extends CustomState<_ChatIconAndTitle, void, ConversationViewController> {
+class _CupertinoConversationTitleState extends CustomState<CupertinoConversationTitle, void, ConversationViewController> {
   String title = "Unknown";
   late final StreamSubscription sub;
   String? cachedDisplayName = "";
@@ -455,10 +455,23 @@ class _ChatIconAndTitleState extends CustomState<_ChatIconAndTitle, void, Conver
   late String cachedGuid;
 
   late StreamSubscription sub2;
+  StreamSubscription? _contactsSubscription;
 
   @override
   void initState() {
     super.initState();
+    _contactsSubscription = eventDispatcher.stream.listen((event) {
+      if (kIsWeb || event.item1 != 'update-contacts' || !mounted) return;
+      final changed = event.item2 as List<List<int>>;
+      if (!controller.chat.participants.any((h) =>
+          changed.first.contains(h.contactRelation.targetId) || changed.last.contains(h.id))) return;
+      ChatLifecycleManager.reloadContacts(controller.chat, changed);
+      setState(() {
+        title = controller.chat.getTitle();
+        cachedDisplayName = controller.chat.displayName;
+        cachedParticipants = controller.chat.handles;
+      });
+    });
     sub2 = controller.suggestedContact.listen((c) {
       setState(() {
         cachedDisplayName = controller.chat.displayName;
@@ -526,6 +539,7 @@ class _ChatIconAndTitleState extends CustomState<_ChatIconAndTitle, void, Conver
   void dispose() {
     sub.cancel();
     sub2.cancel();
+    _contactsSubscription?.cancel();
     super.dispose();
   }
 

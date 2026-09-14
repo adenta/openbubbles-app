@@ -13,6 +13,9 @@ import 'package:bluebubbles/services/ui/chat/chat_lifecycle_manager.dart';
 import 'package:bluebubbles/services/backend_ui_interop/event_dispatcher.dart';
 import 'package:bluebubbles/app/layouts/contact_selector_view/contact_selector_view.dart';
 import 'package:bluebubbles/app/components/avatars/contact_avatar_widget.dart';
+import 'package:bluebubbles/app/layouts/conversation_view/widgets/header/cupertino_header.dart';
+import 'package:bluebubbles/app/layouts/conversation_view/widgets/header/material_header.dart';
+import 'package:bluebubbles/services/ui/chat/conversation_view_controller.dart';
 
 class ScratchState implements CardDavStateStore {
   final saved = <String, AddressBook>{};
@@ -114,12 +117,14 @@ void main() {
     Database.store = Store(getObjectBoxModel(), directory: scratch.path);
     Database.contacts = Database.store.box<Contact>();
     Database.handles = Database.store.box<Handle>();
+    Database.chats = Database.store.box<Chat>();
   });
   tearDownAll(() {
     Database.store.close();
     scratch.deleteSync(recursive: true);
   });
   setUp(() {
+    Database.chats.removeAll();
     Database.handles.removeAll();
     Database.contacts.removeAll();
     state = ScratchState();
@@ -394,6 +399,58 @@ void main() {
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
+
+  for (final cupertino in [true, false]) {
+    testWidgets(
+        'open conversation title refreshes on import, edit and deletion (Cupertino: $cupertino)',
+        (tester) async {
+      final hid =
+          Database.handles.put(Handle(address: 'first@example.invalid'));
+      final chat = Chat(
+          guid: 'synthetic-header', participants: [Database.handles.get(hid)!]);
+      chat.id = Database.chats.put(chat);
+      final controller = ConversationViewController(chat);
+      await tester.pumpWidget(AdaptiveTheme(
+        light: ThemeData.light(),
+        dark: ThemeData.dark(),
+        initial: AdaptiveThemeMode.light,
+        builder: (light, dark) => MaterialApp(
+            theme: light,
+            darkTheme: dark,
+            home: Scaffold(
+                body: SizedBox(
+                    width: 600,
+                    height: 180,
+                    child: cupertino
+                        ? CupertinoConversationTitle(
+                            parentController: controller)
+                        : MaterialConversationTitle(
+                            parentController: controller)))),
+      ));
+      await tester.pump();
+      for (final name in ['Synthetic Person', 'Edited Person']) {
+        client.fetch = () async => [
+              delta([upsert('first', name: name)])
+            ];
+        await tester.runAsync(() => service.refreshContacts());
+        await tester.pump();
+        expect(find.text(name, findRichText: true), findsOneWidget);
+      }
+      client.fetch = () async => [
+            delta([ContactChange.deleted(href: href('first'))])
+          ];
+      await tester.runAsync(() => service.refreshContacts());
+      await tester.pump();
+      expect(find.text('Edited Person', findRichText: true), findsNothing);
+      expect(find.text('first@example.invalid', findRichText: true),
+          findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      controller.onClose();
+      service.completeContactsRefresh([], reloadUI: [[], []]);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   for (final google in [false, true]) {
     for (final trailingSlash in [false, true]) {
