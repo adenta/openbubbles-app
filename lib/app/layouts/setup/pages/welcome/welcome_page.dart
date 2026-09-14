@@ -1,3 +1,5 @@
+import 'package:bluebubbles/helpers/linux_dev_build.dart';
+import 'package:universal_io/io.dart';
 import 'dart:math';
 
 import 'package:bluebubbles/app/components/avatars/contact_avatar_widget.dart';
@@ -60,8 +62,10 @@ class _WelcomePageState extends OptimizedState<WelcomePage> with TickerProviderS
   @override
   Widget build(BuildContext context) {
     return SetupPageTemplate(
-      title: "Welcome to OpenBubbles",
-      subtitle: "Send and receive iMessages from your Android. Become a blue bubble!",
+      title: Platform.isLinux ? "Welcome to OpenBubbles Dev" : "Welcome to OpenBubbles",
+      subtitle: Platform.isLinux
+          ? "Build $linuxDevBuildId"
+          : "Send and receive iMessages from your Android. Become a blue bubble!",
       aboveTitle: Theme(
         data: context.theme.copyWith(
           // in case some components still use legacy theming

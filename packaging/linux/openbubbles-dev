@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+# Keep the real HOME for desktop services; isolate all app storage through XDG.
+# The marker makes re-execution from inside the application idempotent.
+if [ "${OPENBUBBLES_DEV_ENV:-}" != 1 ]; then
+  export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/openbubbles-dev"
+  export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/openbubbles-dev"
+  export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/openbubbles-dev"
+  export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/openbubbles-dev"
+  export OPENBUBBLES_DEV_ENV=1
+fi
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
+cd /opt/openbubbles-dev
+exec ./bluebubbles "$@"

@@ -1,0 +1,17 @@
+# Build input is the release bundle produced by bin/build-linux-dev.
+pkgname=openbubbles-dev
+pkgver=1.15.0.r205
+pkgrel=${OPENBUBBLES_PACKAGE_RELEASE:?Run bin/build-linux-dev}
+pkgdesc='OpenBubbles development app with the pinned official messaging engine'
+arch=('x86_64')
+url='https://github.com/OpenBubbles/openbubbles-app'
+license=('Apache-2.0')
+depends=('gtk3' 'libayatana-appindicator' 'webkit2gtk-4.1' 'libsecret' 'mpv' 'libnotify')
+options=('!strip' '!debug')
+package() {
+  install -dm755 "$pkgdir/opt/openbubbles-dev"
+  cp -a "$OPENBUBBLES_BUNDLE/." "$pkgdir/opt/openbubbles-dev/"
+  install -Dm755 "$OPENBUBBLES_SOURCE/packaging/linux/openbubbles-dev" "$pkgdir/usr/bin/openbubbles-dev"
+  install -Dm644 "$OPENBUBBLES_SOURCE/packaging/linux/app.openbubbles.Dev.desktop" "$pkgdir/usr/share/applications/app.openbubbles.Dev.desktop"
+  install -Dm644 "$OPENBUBBLES_SOURCE/assets/icon/icon.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/app.openbubbles.Dev.png"
+}

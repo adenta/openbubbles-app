@@ -1,0 +1,3 @@
+# Matches the upstream build workflow; verified with pub get --enforce-lockfile.
+[tools]
+flutter = "3.24.0"

@@ -1,0 +1,30 @@
+{
+  "release": "v1.15.0+205",
+  "source_revision": "852c9910f456492f7f840ac4ff2a8bad7a1ee8c8",
+  "url": "https://github.com/OpenBubbles/openbubbles-app/releases/download/v1.15.0%2B205/bluebubbles-linux-x86_64.tar",
+  "archive_sha256": "5584a4e79dbd22fcf19b51fb6ff6426d7f132555677e1ae9d3421f04657b563a",
+  "archive_member": "./lib/librust_lib_bluebubbles.so",
+  "engine_filename": "librust_lib_bluebubbles.so",
+  "engine_sha256": "ce260415598b78c0810ae6b917145fbca804f6f19385ca9d34d55921d38210cf",
+  "architecture": "x86_64",
+  "flutter_rust_bridge": "2.3.0",
+  "interface_signature": -208244658,
+  "interface_files": {
+    "lib/src/rust/api/api.dart": "300f12c8724cecb171143dda390e504d18d465d594de3b4c4a3aaa3d6e0fd47b",
+    "lib/src/rust/api/api.freezed.dart": "901b94d8aa30c480dc3bd7717d66d071f909f4e5f6ea7eb3d8a15a0360e18229",
+    "lib/src/rust/frb_generated.dart": "a5f342f48583dc45e606a25e58813a30fd7ac1d2f7f05df451948d3c8c7da6ad",
+    "lib/src/rust/frb_generated.io.dart": "05252c35a9a4226d14220d98720c1d169934b0c6120ce4599059294c7dd659fc",
+    "lib/src/rust/lib.dart": "5aa45f0333a6787b8326ce4a70e6e8500c443228e4d352126c00549e6b46e906",
+    "rust/src/api/api.rs": "f787780be56c05f98bcabdc39780371925ded5f4fc18012429da925da8de0dcb",
+    "rust/src/api/hw_testing.plist": "4ed2ff7c507513df8261650a2d064ed3770b5aeb19b78a9f2c3eacdc6886edf7",
+    "rust/src/api/id_testing.plist": "47dae30a8b208485d0c9883c37e1bd2d952c25156a8b13343ccde874bfc97ebb",
+    "rust/src/api/mirrors.rs": "5545eeaf59736a749f58a666a602e50f44599ffab7db9b363d3edc6b1073d7c7",
+    "rust/src/api/mod.rs": "34effa19cfbb50e4a33e86181df5d73cfb69fd7923a592a87788497809b78578",
+    "rust/src/frb_generated.io.rs": "a6ed75292328cad93e047250f0615adfa0a59e50fca34e253dcf6c881ae49023",
+    "rust/src/frb_generated.rs": "5d87f4de47112389d90be7f62fb9a983a363e82771049657accb1a57ef09def6",
+    "rust/src/frb_generated.web.rs": "c524007a8ba21f33ca576b6f0e3457770febe0f7bb306db9956883ebf70c0aef",
+    "rust/src/lib.rs": "ca61bfdd36dc4c39470b5cf224c86026954d887e6fde17484fbed8eccb074007",
+    "rust/src/mac_hw_info.proto": "621eedbc97207d504c107b27eb074253f75729414ef9447e7c5c8d1b553223c0",
+    "rust/src/native.rs": "2882466a295db211fb88963978abb11b0df5aa7d659af27a7c7855ef86179a40"
+  }
+}

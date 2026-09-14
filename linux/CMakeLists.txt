@@ -1,5 +1,7 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.12)
+# Old pinned plugins still declare CMake 3.5 compatibility.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
@@ -7,7 +9,7 @@ project(runner LANGUAGES CXX)
 set(BINARY_NAME "bluebubbles")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "app.bluebubbles.BlueBubbles")
+set(APPLICATION_ID "app.openbubbles.Dev")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -89,6 +91,11 @@ set_target_properties(${BINARY_NAME}
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
+# The pinned tray plugins use an API newly deprecated by Ayatana 0.6.
+# Keep the warning, but do not turn it into an error in these external targets.
+foreach(TRAY_TARGET tray_manager_plugin system_tray_plugin)
+  target_compile_options(${TRAY_TARGET} PRIVATE -Wno-error=deprecated-declarations)
+endforeach()
 
 target_link_libraries(${BINARY_NAME} PRIVATE ${MIMALLOC_LIB})
 

@@ -1,3 +1,4 @@
+import 'package:bluebubbles/helpers/linux_dev_build.dart';
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:math';
@@ -128,7 +129,7 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
           /* ----- WINDOW INITIALIZATION ----- */
           await windowManager.ensureInitialized();
           await windowManager.setPreventClose(ss.settings.closeToTray.value);
-          await windowManager.setTitle('OpenBubbles');
+          await windowManager.setTitle(desktopAppTitle);
           await Window.initialize();
           if (Platform.isWindows) {
             await Window.hideWindowControls();
@@ -162,7 +163,7 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
             await ss.prefs.setDouble("window-x", posX);
             await ss.prefs.setDouble("window-y", posY);
 
-            await windowManager.setTitle('OpenBubbles');
+            await windowManager.setTitle(desktopAppTitle);
             if (arguments.firstOrNull != "minimized") {
               await windowManager.show();
             }
@@ -229,6 +230,16 @@ class DesktopWindowListener extends WindowListener {
     await ss.prefs.setDouble("window-height", size.height);
   }
 
+  Timer? _linuxResizeSave;
+
+  @override
+  void onWindowResize() {
+    // Linux emits "resize", whereas the existing handler uses "resized".
+    if (!Platform.isLinux) return;
+    _linuxResizeSave?.cancel();
+    _linuxResizeSave = Timer(const Duration(milliseconds: 200), onWindowResized);
+  }
+
   @override
   void onWindowMoved() async {
     Offset offset = await windowManager.getPosition();
@@ -272,7 +283,7 @@ class Main extends StatelessWidget {
       initial: AdaptiveThemeMode.system,
       builder: (theme, darkTheme) => GetMaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'BlueBubbles',
+        title: Platform.isLinux ? desktopAppTitle : 'BlueBubbles',
         theme: theme.copyWith(appBarTheme: theme.appBarTheme.copyWith(elevation: 0.0)),
         darkTheme: darkTheme.copyWith(appBarTheme: darkTheme.appBarTheme.copyWith(elevation: 0.0)),
         navigatorKey: ns.key,
@@ -518,7 +529,7 @@ class _HomeState extends OptimizedState<Home> with WidgetsBindingObserver, TrayL
         }
 
         /* ----- NOTIFICATIONS INITIALIZATION ----- */
-        await localNotifier.setup(appName: "BlueBubbles");
+        await localNotifier.setup(appName: Platform.isLinux ? "OpenBubbles Dev" : "BlueBubbles");
       }
 
       if (!ss.settings.finishedSetup.value) {
@@ -660,13 +671,22 @@ Future<void> initSystemTray() async {
     String path;
     if (isFlatpak) {
       path = 'app.bluebubbles.BlueBubbles';
-    } else if (isSnap) {
+    } else if (isSnap || Platform.isLinux) {
       path = p.joinAll([p.dirname(Platform.resolvedExecutable), 'data/flutter_assets/assets/icon', 'icon.png']);
     } else {
       path = 'assets/icon/icon.png';
     }
 
-    await trayManager.setIcon(path);
+    if (Platform.isLinux) {
+      // The pinned plugin otherwise generates a new short ID on every launch.
+      // Supply a stable, D-Bus-safe ID and the absolute packaged icon path.
+      await const MethodChannel('tray_manager').invokeMethod('setIcon', {
+        'id': 'app_openbubbles_Dev',
+        'iconPath': path,
+      });
+    } else {
+      await trayManager.setIcon(path);
+    }
   }
 
   await setSystemTrayContextMenu(windowHidden: !appWindow.isVisible);

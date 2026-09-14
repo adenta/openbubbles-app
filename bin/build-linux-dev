@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/.."
+export OPENBUBBLES_SOURCE="$PWD"
+export OPENBUBBLES_PACKAGE_RELEASE="${1:?Usage: bin/build-linux-dev PACKAGE_RELEASE (positive integer)}"
+[[ "$OPENBUBBLES_PACKAGE_RELEASE" =~ ^[1-9][0-9]*$ ]] || { echo 'Package release must be a positive integer.' >&2; exit 1; }
+for cmd in mise node curl tar sha256sum objdump cmake ninja clang++ makepkg; do
+  command -v "$cmd" >/dev/null || { echo "Missing build dependency: $cmd" >&2; exit 1; }
+done
+revision=$(git rev-parse HEAD)
+build_id="205-dev.${OPENBUBBLES_PACKAGE_RELEASE}-${revision:0:8}"
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then build_id+="-dirty"; fi
+receipt="$PWD/build/receipts/$build_id-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$receipt"
+exec > >(tee "$receipt/build.log") 2>&1
+printf 'Building %s\n' "$build_id"
+git submodule update --init --recursive telephony_plus
+export OPENBUBBLES_ENGINE_LIBRARY
+OPENBUBBLES_ENGINE_LIBRARY=$(node bin/official-engine.mjs prepare)
+# Public source lists .env as an asset and rejects a zero-byte file.
+# Never accidentally package a developer's credentials.
+if [[ -s .env ]] && ! cmp -s .env packaging/linux/public.env; then
+  echo 'Refusing to overwrite or package a private .env.' >&2; exit 1
+fi
+cp packaging/linux/public.env .env
+mise exec flutter@3.24.0 -- flutter --version --machine > "$receipt/flutter.json"
+mise exec flutter@3.24.0 -- flutter --suppress-analytics pub get --enforce-lockfile
+mise exec flutter@3.24.0 -- flutter --suppress-analytics build linux --release --no-pub --dart-define="OPENBUBBLES_BUILD_ID=$build_id"
+export OPENBUBBLES_BUNDLE="$PWD/build/linux/x64/release/bundle"
+node bin/official-engine.mjs verify "$OPENBUBBLES_BUNDLE/lib/librust_lib_bluebubbles.so"
+for binary in "$OPENBUBBLES_BUNDLE/bluebubbles" "$OPENBUBBLES_BUNDLE"/lib/*.so; do
+  printf '%s\n' "$binary"
+  LD_LIBRARY_PATH="$OPENBUBBLES_BUNDLE/lib" ldd "$binary"
+done > "$receipt/runtime-libraries.txt" 2>&1
+if grep -q 'not found' "$receipt/runtime-libraries.txt"; then
+  cat "$receipt/runtime-libraries.txt"
+  echo 'Missing runtime libraries; refusing to package.' >&2; exit 1
+fi
+sha256sum "$OPENBUBBLES_BUNDLE"/lib/*.so > "$receipt/native-libraries.sha256"
+{
+  printf 'build_id=%s\napp_revision=%s\n' "$build_id" "$revision"
+  git status --short
+  git submodule status --recursive
+  sha256sum packaging/linux/engine.json pubspec.lock "$OPENBUBBLES_BUNDLE/lib/librust_lib_bluebubbles.so"
+  cmake --version | head -1
+  ninja --version
+  clang++ --version | head -1
+  pacman -Q gtk3 libayatana-appindicator webkit2gtk-4.1 libsecret mpv
+} > "$receipt/provenance.txt"
+cp "$receipt/provenance.txt" "$OPENBUBBLES_BUNDLE/build-info.txt"
+cp "$receipt/flutter.json" "$OPENBUBBLES_BUNDLE/flutter-toolchain.json"
+cp packaging/linux/engine.json "$OPENBUBBLES_BUNDLE/engine-manifest.json"
+mkdir -p build/arch
+cp packaging/linux/PKGBUILD build/arch/PKGBUILD
+(cd build/arch && makepkg --force --noconfirm)
+package="$PWD/build/arch/openbubbles-dev-1.15.0.r205-$OPENBUBBLES_PACKAGE_RELEASE-x86_64.pkg.tar.zst"
+sha256sum "$package" | tee "$receipt/package.sha256"
+printf 'Package: %s\nReceipt: %s\n' "$package" "$receipt"

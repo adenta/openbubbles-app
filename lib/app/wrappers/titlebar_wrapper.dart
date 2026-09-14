@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:bluebubbles/helpers/linux_dev_build.dart';
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/header/header_widgets.dart';
@@ -56,7 +57,17 @@ class TitleBar extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: MoveWindow(),
+            child: MoveWindow(
+              child: Platform.isLinux
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(desktopAppTitle, style: context.theme.textTheme.labelSmall),
+                      ),
+                    )
+                  : null,
+            ),
           ),
           const WindowButtons()
         ],

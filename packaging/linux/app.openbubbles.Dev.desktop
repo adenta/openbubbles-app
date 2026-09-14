@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OpenBubbles Dev
+Comment=Development build of OpenBubbles
+Exec=/usr/bin/openbubbles-dev %U
+Icon=app.openbubbles.Dev
+Terminal=false
+Categories=Network;InstantMessaging;
+StartupWMClass=app.openbubbles.Dev
+StartupNotify=true

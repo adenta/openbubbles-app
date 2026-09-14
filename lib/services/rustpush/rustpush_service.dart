@@ -2594,6 +2594,8 @@ class RustPushService extends GetxService {
   }
 
   Future<PurchaseWrapper?> getPurchaseDetails() async {
+    // Google Play purchases are unavailable on the Linux desktop.
+    if (Platform.isLinux) return null;
     try {
       var purchases = await pushService.client.runWithClient((client) => client.queryPurchases(ProductType.subs));
       var token = purchases.purchasesList.firstOrNull?.purchaseToken;
@@ -4713,7 +4715,8 @@ class RustPushService extends GetxService {
   // uniquely identify the backend service that is running
   String serviceId = "";
 
-  BillingClientManager client = BillingClientManager();
+  // Android billing connects on construction. Only initialize it when used.
+  late final BillingClientManager client = BillingClientManager();
 
   @override
   Future<void> onInit() async {
@@ -4836,6 +4839,8 @@ class RustPushService extends GetxService {
   }
 
   void initMixPanel() async {
+    // The pinned Mixpanel plugin has no Linux implementation.
+    if (Platform.isLinux) return;
     if (ss.settings.finishedSetup.value && !ss.settings.deviceIsHosted.value) return;
     mixpanel = await Mixpanel.init("d66dc2d8f2ad649fac2640ff059dc9f4", trackAutomaticEvents: false);
   }
