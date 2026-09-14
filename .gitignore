@@ -58,3 +58,9 @@ native-lib/target/**
 
 /rust/src/api/hw_testing.plist
 /rust/src/api/id_testing.plist
+# Local research from the original workspace (includes personal device findings).
+/docs/maintenance/phone-activation-inspection.md
+/docs/maintenance/linux-app-source-audit.md
+/docs/maintenance/linux-app-audit-evidence.json
+/docs/maintenance/original-workspace-readme.md
+/docs/maintenance/local-workspace-status.md

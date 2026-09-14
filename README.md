@@ -34,3 +34,9 @@ If you need help setting up the app, have any issues or feature requests, or jus
 ## Getting Started
 
 [Quickstart](https://openbubbles.app/quickstart.html)
+
+## Development fork
+
+Linux build readiness, known native input blockers, and reproduction commands
+are documented in [Linux build readiness](docs/maintenance/linux-build-readiness.md).
+Linux and Android development share this repository.

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Source-readiness check only: a pass does not prove activation or messaging.
+set -euo pipefail
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+failed=0
+for command in git rg; do
+  command -v "$command" >/dev/null || { echo "Missing checker dependency: $command" >&2; exit 2; }
+done
+echo "Application revision: $(git rev-parse HEAD)"
+if git submodule status --recursive | rg '^[+-U]'; then
+  echo 'BLOCKED: submodules are absent, conflicted, or differ from their pinned commits.'
+  failed=1
+fi
+missing=0
+for suffix in 193 194 195 196 197 198 199 200 201 208; do
+  for ext in crt pem; do
+    file="rustpush/certs/fairplay/4056631661436364584235346952${suffix}.${ext}"
+    if [[ ! -s "$file" ]]; then
+      echo "Missing native compile input: $file"
+      missing=$((missing + 1))
+    fi
+  done
+done
+if (( missing )); then
+  echo "BLOCKED: $missing FairPlay files are missing or empty. Do not synthesize placeholder inputs."
+  failed=1
+fi
+validation=rustpush/open-absinthe/src/nac.rs
+if [[ ! -f "$validation" ]] || rg -q 'todo!\(|Not supported with binary!' "$validation"; then
+  echo 'BLOCKED: OpenAbsinthe validation is missing or contains the public placeholder implementation.'
+  echo 'Obtain a supported implementation or a native artifact with verified bridge compatibility and provenance.'
+  failed=1
+fi
+if (( failed )); then
+  echo 'Native source is not ready for the functional Linux build proof. See docs/maintenance/linux-build-readiness.md.'
+  exit 2
+fi
+echo 'Known missing-input checks passed. This is not a certificate-provenance, build, or activation test.'
