@@ -36,11 +36,20 @@ class _ImageViewerState extends OptimizedState<ImageViewer> with AutomaticKeepAl
   ConversationViewController? get controller => widget.controller;
 
   Uint8List? data;
+  bool hasError = false;
+  int _loadGeneration = 0;
+  StreamSubscription? _imageChanges;
 
   @override
   void initState() {
     super.initState();
     if (attachment.guid!.contains("demo") || controller == null) return;
+    _imageChanges = as.imageChanges.listen((event) {
+      if (event.guid != attachment.guid || !mounted) return;
+      _loadGeneration++;
+      setState(() { data = null; hasError = event.failed; });
+      if (event.ready) initBytes();
+    });
     data = controller!.imageData[attachment.guid];
     updateObx(() {
       initBytes();
@@ -49,21 +58,33 @@ class _ImageViewerState extends OptimizedState<ImageViewer> with AutomaticKeepAl
 
   void initBytes() async {
     if (data != null) return;
-    // Try to get the image data from the "cache"
-    Uint8List? tmpData = controller!.imageData[attachment.guid];
-    if (tmpData == null) {
+    final generation = ++_loadGeneration;
+    Uint8List? bytes = controller?.imageData[attachment.guid];
+    if (bytes == null) {
       final completer = Completer<Uint8List>();
       controller!.queueImage(Tuple4(attachment, file, context, completer));
-      final newData = await completer.future;
-      if (newData.isEmpty) return;
-      setState(() {
-        data = newData;
-      });
-    } else {
-      setState(() {
-        data = tmpData;
-      });
+      bytes = await completer.future;
     }
+    if (!mounted || generation != _loadGeneration) return;
+    setState(() {
+      hasError = bytes!.isEmpty;
+      data = hasError ? null : bytes;
+    });
+  }
+
+  void retry() {
+    setState(() { hasError = false; data = null; });
+    as.redownloadAttachment(attachment, onError: () {
+      if (mounted) setState(() => hasError = true);
+    });
+  }
+
+  Widget failure() => TextButton(onPressed: retry, child: const Text('Failed to display image. Retry'));
+
+  @override
+  void dispose() {
+    _imageChanges?.cancel();
+    super.dispose();
   }
 
   @override
@@ -72,6 +93,7 @@ class _ImageViewerState extends OptimizedState<ImageViewer> with AutomaticKeepAl
     if (attachment.guid!.contains("demo")) {
       return Image.asset(attachment.transferName!, fit: BoxFit.cover);
     }
+    if (hasError) return failure();
     if (data == null) {
       return SizedBox(
         width: min((attachment.width?.toDouble() ?? ns.width(context) * 0.5), ns.width(context) * 0.5),
@@ -114,10 +136,7 @@ class _ImageViewerState extends OptimizedState<ImageViewer> with AutomaticKeepAl
           )
         );
       },
-      errorBuilder: (context, object, stacktrace) => Center(
-        heightFactor: 1,
-        child: Text("Failed to display image", style: context.theme.textTheme.bodyLarge),
-      ),
+      errorBuilder: (context, object, stacktrace) => failure(),
     );
   }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'package:bluebubbles/helpers/files/serial_work_queue.dart';
 
 import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:bluebubbles/app/components/custom_text_editing_controllers.dart';
@@ -33,13 +34,19 @@ class ConversationViewController extends StatefulController with GetSingleTicker
 
   ConversationViewController(this.chat, {String? tag_}) {
     tag = tag_ ?? chat.guid;
+    _imageChanges = as.imageChanges.listen((event) {
+      _imageGenerations[event.guid] = (_imageGenerations[event.guid] ?? 0) + 1;
+      imageData.remove(event.guid);
+    });
     recipientNotifsSilenced.value = chat.notifsSilenced;
     reportJunkAvailable.value = !(chat.senderIsKnown ?? true);
   }
 
   // caching items
   final Map<String, Uint8List> imageData = {};
-  final List<Tuple4<Attachment, PlatformFile, BuildContext, Completer<Uint8List>>> imageCacheQueue = [];
+  final _imageQueue = SerialWorkQueue();
+  late final StreamSubscription _imageChanges;
+  final Map<String?, int> _imageGenerations = {};
   final Map<String, Map<String, (Uint8List, StickerData?)>> stickerData = {};
   final Map<String, Metadata> legacyUrlPreviews = {};
   final Map<String, VideoController> videoPlayers = {};
@@ -98,7 +105,6 @@ class ConversationViewController extends StatefulController with GetSingleTicker
   double _keyboardOffset = 0;
   Timer? _scrollDownDebounce;
   Future<void> Function(Tuple7<List<PlatformFile>, AttributedBody, String, String?, int?, String?, PayloadData?>, bool, DateTime?)? sendFunc;
-  bool isProcessingImage = false;
 
   final Rxn<api.SimplifiedTranscriptPoster> backgroundPoster = Rxn<api.SimplifiedTranscriptPoster>(null);
   Map<String, ui.Image> images = {};
@@ -213,6 +219,7 @@ class ConversationViewController extends StatefulController with GetSingleTicker
 
   @override
   void onClose() {
+    _imageChanges.cancel();
     for (PlayerController a in audioPlayers.values) {
       a.pausePlayer();
       a.dispose();
@@ -261,49 +268,42 @@ class ConversationViewController extends StatefulController with GetSingleTicker
   }
 
   void queueImage(Tuple4<Attachment, PlatformFile, BuildContext, Completer<Uint8List>> item) {
-    imageCacheQueue.add(item);
-    if (!isProcessingImage) _processNextImage();
-  }
-
-  Future<void> _processNextImage() async {
-    if (imageCacheQueue.isEmpty) {
-      isProcessingImage = false;
-      return;
-    }
-
-    isProcessingImage = true;
-    final queued = imageCacheQueue.removeAt(0);
-    final attachment = queued.item1;
-    final file = queued.item2;
-    Uint8List? tmpData;
-    // If it's an image, compress the image when loading it
-    if (kIsWeb || file.path == null) {
-      if (attachment.mimeType?.contains("image/tif") ?? false) {
-        final receivePort = ReceivePort();
-        await Isolate.spawn(unsupportedToPngIsolate, IsolateData(file, receivePort.sendPort));
-        // Get the processed image from the isolate.
-        final image = await receivePort.first as Uint8List?;
-        tmpData = image;
+    _imageQueue.run(() async {
+      final attachment = item.item1;
+      final generation = _imageGenerations[attachment.guid] ?? 0;
+      final file = item.item2;
+      Uint8List? bytes;
+      if (kIsWeb || file.path == null) {
+        if (attachment.mimeType?.contains("image/tif") ?? false) {
+          final receivePort = ReceivePort();
+          try {
+            await Isolate.spawn(unsupportedToPngIsolate, IsolateData(file, receivePort.sendPort));
+            bytes = await receivePort.first as Uint8List?;
+          } finally {
+            receivePort.close();
+          }
+        } else {
+          bytes = file.bytes;
+        }
+      } else if (attachment.canCompress) {
+        bytes = await as.loadAndGetProperties(attachment, actualPath: file.path!);
       } else {
-        tmpData = file.bytes;
+        bytes = await File(file.path!).readAsBytes();
       }
-    } else if (attachment.canCompress) {
-      tmpData = await as.loadAndGetProperties(attachment, actualPath: file.path!);
-      // All other attachments can be held in memory as bytes
-    } else {
-      tmpData = await File(file.path!).readAsBytes();
-    }
-    if (tmpData == null) {
-      queued.item4.complete(Uint8List.fromList([]));
-      return;
-    }
-    imageData[attachment.guid!] = tmpData;
-    try {
-      await precacheImage(MemoryImage(tmpData), queued.item3);
-    } catch (_) {}
-    queued.item4.complete(tmpData);
-
-    await _processNextImage();
+      if (bytes == null || bytes.isEmpty || generation != (_imageGenerations[attachment.guid] ?? 0) || isClosed) {
+        return Uint8List(0);
+      }
+      if (item.item3.mounted) {
+        Object? decodeError;
+        await precacheImage(MemoryImage(bytes), item.item3, onError: (error, stack) => decodeError = error);
+        if (decodeError != null) return Uint8List(0);
+      }
+      if (generation != (_imageGenerations[attachment.guid] ?? 0) || isClosed) return Uint8List(0);
+      imageData[attachment.guid!] = bytes;
+      return bytes;
+    }).then(item.item4.complete, onError: (Object _, StackTrace __) {
+      item.item4.complete(Uint8List(0));
+    });
   }
 
   bool isSelected(String guid) {

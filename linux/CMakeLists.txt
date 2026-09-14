@@ -56,6 +56,12 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
 pkg_check_modules(JSON_GLIB REQUIRED IMPORTED_TARGET json-glib-1.0)
+pkg_check_modules(HEIF REQUIRED IMPORTED_TARGET libheif>=1.23)
+pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
+
+add_executable(openbubbles-heic-decode "heic_decode.cc")
+apply_standard_settings(openbubbles-heic-decode)
+target_link_libraries(openbubbles-heic-decode PRIVATE PkgConfig::HEIF PkgConfig::PNG)
 
 add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 
@@ -118,6 +124,8 @@ set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+install(TARGETS openbubbles-heic-decode RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

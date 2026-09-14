@@ -28,7 +28,7 @@ mise exec flutter@3.24.0 -- flutter --suppress-analytics pub get --enforce-lockf
 mise exec flutter@3.24.0 -- flutter --suppress-analytics build linux --release --no-pub --dart-define="OPENBUBBLES_BUILD_ID=$build_id"
 export OPENBUBBLES_BUNDLE="$PWD/build/linux/x64/release/bundle"
 node bin/official-engine.mjs verify "$OPENBUBBLES_BUNDLE/lib/librust_lib_bluebubbles.so"
-for binary in "$OPENBUBBLES_BUNDLE/bluebubbles" "$OPENBUBBLES_BUNDLE"/lib/*.so; do
+for binary in "$OPENBUBBLES_BUNDLE/bluebubbles" "$OPENBUBBLES_BUNDLE/openbubbles-heic-decode" "$OPENBUBBLES_BUNDLE"/lib/*.so; do
   printf '%s\n' "$binary"
   LD_LIBRARY_PATH="$OPENBUBBLES_BUNDLE/lib" ldd "$binary"
 done > "$receipt/runtime-libraries.txt" 2>&1
@@ -45,7 +45,7 @@ sha256sum "$OPENBUBBLES_BUNDLE"/lib/*.so > "$receipt/native-libraries.sha256"
   cmake --version | head -1
   ninja --version
   clang++ --version | head -1
-  pacman -Q gtk3 libayatana-appindicator webkit2gtk-4.1 libsecret mpv
+  pacman -Q gtk3 libayatana-appindicator webkit2gtk-4.1 libsecret mpv libheif libde265 libpng
 } > "$receipt/provenance.txt"
 cp "$receipt/provenance.txt" "$OPENBUBBLES_BUNDLE/build-info.txt"
 cp "$receipt/flutter.json" "$OPENBUBBLES_BUNDLE/flutter-toolchain.json"

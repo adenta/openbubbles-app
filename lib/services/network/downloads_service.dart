@@ -101,8 +101,17 @@ class AttachmentDownloadController extends GetxController {
     try {
         response = await backend.downloadAttachment(attachment,
           onReceiveProgress: (count, total) => setProgress(kIsWeb ? (count / total) : (count / attachment.totalBytes!)));
+        // Make bytes durable before decoding or notifying any viewer.
+        if (!kIsWeb && response.path == null) {
+          final bytes = response.bytes ?? attachment.bytes;
+          if (bytes == null) throw StateError('Attachment download returned no data');
+          final original = await File(attachment.path).create(recursive: true);
+          await original.writeAsBytes(bytes, flush: true);
+          response.path = attachment.path;
+        }
     } catch (e, stack) {
       Logger.error("Attachment fetch error", error: e, trace: stack);
+      as.imageDownloadFailed(attachment);
       if (!kIsWeb) {
         File file = File(attachment.path);
         if (await file.exists()) {
@@ -117,11 +126,6 @@ class AttachmentDownloadController extends GetxController {
       attachmentDownloader._removeFromQueue(this);
       return;
     }
-    if (!kIsWeb && !kIsDesktop && response.path == null) {
-      File _file = await File(attachment.path).create(recursive: true);
-      await _file.writeAsBytes(response.bytes!);
-      response.path = attachment.path;
-    }
     Logger.info("Finished fetching attachment");
     stopwatch.stop();
     Logger.info("Attachment downloaded in ${stopwatch.elapsedMilliseconds} ms");
@@ -129,7 +133,7 @@ class AttachmentDownloadController extends GetxController {
     try {
       // Compress the attachment
       if (!kIsWeb) {
-        await as.loadAndGetProperties(attachment, actualPath: attachment.path);
+        await as.loadAndGetProperties(attachment, actualPath: response.path ?? attachment.path);
         attachment.save(null);
       }
     } catch (ex) {
@@ -141,14 +145,9 @@ class AttachmentDownloadController extends GetxController {
     // Add attachment to sink based on if we got data
 
     file.value = response;
+    as.imageDownloadComplete(attachment);
     for (Function f in completeFuncs) {
       f.call(file.value);
-    }
-    if (kIsDesktop) {
-      if (attachment.bytes != null) {
-        File _file = await File(attachment.path).create(recursive: true);
-        await _file.writeAsBytes(attachment.bytes!.toList());
-      }
     }
     if (ss.settings.autoSave.value
         && !kIsWeb
