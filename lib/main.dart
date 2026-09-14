@@ -137,14 +137,17 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
             await windowManager
                 .setTitleBarStyle(ss.settings.useCustomTitleBar.value ? TitleBarStyle.hidden : TitleBarStyle.normal);
           }
+          // Capture saved dimensions before GTK's initial resize events arrive.
+          final savedWindowWidth = ss.prefs.getDouble("window-width");
+          final savedWindowHeight = ss.prefs.getDouble("window-height");
           windowManager.addListener(DesktopWindowListener.instance);
           doWhenWindowReady(() async {
             await windowManager.setMinimumSize(const Size(300, 300));
             Display primary = await ScreenRetriever.instance.getPrimaryDisplay();
 
             Size size = await windowManager.getSize();
-            double width = ss.prefs.getDouble("window-width") ?? size.width;
-            double height = ss.prefs.getDouble("window-height") ?? size.height;
+            double width = savedWindowWidth ?? size.width;
+            double height = savedWindowHeight ?? size.height;
 
             width = width.clamp(300, max(300, primary.size.width));
             height = height.clamp(300, max(300, primary.size.height));
@@ -167,6 +170,7 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
             if (arguments.firstOrNull != "minimized") {
               await windowManager.show();
             }
+            DesktopWindowListener.instance.geometryReady = true;
             if (!(ss.canAuthenticate && ss.settings.shouldSecure.value)) {
               chats.init();
               socket;
@@ -231,11 +235,12 @@ class DesktopWindowListener extends WindowListener {
   }
 
   Timer? _linuxResizeSave;
+  bool geometryReady = false;
 
   @override
   void onWindowResize() {
     // Linux emits "resize", whereas the existing handler uses "resized".
-    if (!Platform.isLinux) return;
+    if (!Platform.isLinux || !geometryReady) return;
     _linuxResizeSave?.cancel();
     _linuxResizeSave = Timer(const Duration(milliseconds: 200), onWindowResized);
   }
@@ -344,6 +349,11 @@ class Main extends StatelessWidget {
                       SecureApplicationProvider.of(context, listen: false)!.secure();
                     }
                   }
+                }
+                // Linux has no native secure_application implementation and
+                // does not advertise local authentication support.
+                if (Platform.isLinux && !ss.canAuthenticate) {
+                  return TitleBarWrapper(child: child ?? Container());
                 }
                 return TitleBarWrapper(
                   child: SecureGate(

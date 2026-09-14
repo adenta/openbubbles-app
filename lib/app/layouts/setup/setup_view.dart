@@ -137,7 +137,7 @@ class SetupViewController extends StatefulController {
 
   Future<void> updateIAPState() async {
     hasDanglingSubscription = false;
-    if (currentWaitlist == null && !fetchedReferrer) {
+    if (Platform.isAndroid && currentWaitlist == null && !fetchedReferrer) {
       try {
         ReferrerDetails referrerDetails = await AndroidPlayInstallReferrer.installReferrer;
         var referrer = referrerDetails.installReferrer;
@@ -180,6 +180,8 @@ class SetupViewController extends StatefulController {
         return;
       }
     }
+    // Google Play product queries have no Linux implementation.
+    if (Platform.isLinux) return;
     var details = await pushService.client.runWithClient((client) => client.queryProductDetails(productList: [const ProductWrapper(productId: 'monthly_hosted', productType: ProductType.subs)]));
     if (details.productDetailsList.isEmpty) {
       Logger.warn("Product not found!");
