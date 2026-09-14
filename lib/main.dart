@@ -178,8 +178,8 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
             }
           }
           if (Platform.isLinux) {
-            // The pinned bitsdojo rasterization-ready future does not complete
-            // in our Wayland release session. GTK is ready after the UI frame.
+            // Initialize desktop controls after the first Flutter frame. The
+            // Linux runner restores initial GTK dimensions before plugins load.
             WidgetsBinding.instance.addPostFrameCallback((_) {
               configureDesktopWindow();
             });

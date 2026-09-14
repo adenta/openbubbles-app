@@ -26,7 +26,7 @@ On Arch, build tools and libraries are installed with:
 
 ```sh
 sudo -n pacman -S --needed base-devel clang cmake ninja nodejs curl \
-  gtk3 libayatana-appindicator webkit2gtk-4.1 libsecret mpv libnotify
+  gtk3 json-glib libayatana-appindicator webkit2gtk-4.1 libsecret mpv libnotify
 ```
 
 Reuse a managed Node installation instead of installing `nodejs` when one is
@@ -43,7 +43,10 @@ only when used; Linux does not query Google Play purchases. The unsupported
 native privacy-overlay unlock call is disabled on Linux, while the existing
 authentication checks remain in place. These are desktop startup fixes, without
 native API changes. The tray gets a stable development ID, and Linux resize
-events save the window size after a short debounce.
+events save the window size after a short debounce. The Linux runner reads those
+dimensions before plugins can show the GTK window, using JSON-GLib. This avoids
+depending on later resize requests being honored by a Wayland compositor.
+It starts with the app's custom frame instead of adding a second GTK header.
 
 ## Build
 
