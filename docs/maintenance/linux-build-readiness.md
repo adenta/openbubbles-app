@@ -90,3 +90,12 @@ public releases, and feature changes remain deferred.
 - Shell syntax validation and `git diff --check` passed.
 - No native compilation, package installation, or desktop acceptance was
   claimed. No QR code, 1Password item, or phone operation was used.
+
+## Follow-up: contributor routes and official native reuse
+
+[Contributor build-path research](native-build-paths.md) records the maintainer's
+relay guidance, the limitations of public contributor builds, and an additional
+static compatibility result: the official build-205 native library matches the
+release-205 generated bindings, but not this build-227 baseline. A mixed
+source/binary Linux build is a concrete next experiment; a full native-source
+build remains blocked. No baseline or build policy has been changed yet.
