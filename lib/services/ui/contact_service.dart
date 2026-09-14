@@ -382,6 +382,12 @@ class ContactsService extends GetxService {
     final changed = applyCardDavChanges(results);
     // Publish committed records even if saving a checkpoint subsequently fails.
     completeContactsRefresh(kIsWeb ? contacts : Contact.getContacts(), reloadUI: changed);
+    if (kIsWeb) {
+      for (final chat in chats.chats) {
+        chat.webSyncParticipants();
+      }
+      chats.chats.refresh();
+    }
     if (client != null) {
       for (final result in results.where((r) => r.hasCheckpoint)) {
         await client.state.saveCheckpoint(result.book);
