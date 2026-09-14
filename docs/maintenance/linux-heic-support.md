@@ -72,15 +72,16 @@ the original attachments and account state require no restore.
 - XPS logged an unhandled exception at the unchanged FaceTime header widget,
   `FaceTimeBtnState.initState`, and its smoke-test service was subsequently
   inactive. This does not establish a HEIC-related shutdown. No additional
-  restart was performed. Physical fullscreen zoom, gallery comparison and retry
-  interaction remain to be confirmed with the user.
+  restart was performed. The user subsequently confirmed seeing the HEIC image
+  display correctly. Exhaustive fullscreen zoom, gallery comparison and retry
+  interaction were not separately recorded.
 - No manual contact cache or sync-marker changes were made. Release 9 is
   reserved for the coordinating contacts task.
 
 The shared repository added explicit deployment-approval instructions while
 this rollout was underway. They were discovered after installation and are now
 included in this worktree. Further live restarts, upgrades or data changes need
-the direct user approval described in `AGENTS.md`. The attempted shared-branch
-fast-forward made no changes; consumers should merge this task's branch into
-their own worktree. Later policy/documentation commits do not change release-8
-application code.
+the direct user approval described in `AGENTS.md`. After visually confirming
+HEIC viewing, the user explicitly approved merging this task into the fork's
+Linux development branch and archiving the task. Later policy/documentation
+commits do not change release-8 application code.
