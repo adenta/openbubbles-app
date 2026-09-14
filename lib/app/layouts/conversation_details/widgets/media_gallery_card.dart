@@ -27,6 +27,11 @@ class MediaGalleryCard extends StatefulWidget {
 
 class _MediaGalleryCardState extends OptimizedState<MediaGalleryCard> with AutomaticKeepAliveClientMixin {
   Uint8List? videoPreview;
+  Uint8List? imagePreview;
+  bool loading = false;
+  bool hasError = false;
+  int _loadGeneration = 0;
+  StreamSubscription? _imageChanges;
   Duration? duration;
   AttachmentDownloadController? controller;
   late PlatformFile attachmentFile = PlatformFile(
@@ -42,21 +47,29 @@ class _MediaGalleryCardState extends OptimizedState<MediaGalleryCard> with Autom
   void initState() {
     super.initState();
 
+    _imageChanges = as.imageChanges.listen((event) {
+      if (event.guid != attachment.guid || !mounted) return;
+      _loadGeneration++;
+      setState(() { imagePreview = null; loading = !event.failed; hasError = event.failed; });
+      if (event.ready) getBytes();
+    });
     // check active downloader otherwise check file exists
     if (attachmentDownloader.getController(attachment.guid) != null) {
       controller = attachmentDownloader.getController(attachment.guid);
       controller!.completeFuncs.add((file) {
+        if (!mounted) return;
         setState(() {
           controller = null;
           attachmentFile = file;
         });
-        if (attachment.mimeType?.contains("video") ?? false) {
-          getVideoPreview(file);
-        }
+        if (!kIsWeb) getBytes();
       });
       controller!.errorFuncs.add(() {
+        if (!mounted) return;
         setState(() {
           controller = null;
+          loading = false;
+          hasError = true;
         });
       });
     } else if (!kIsWeb) {
@@ -70,17 +83,19 @@ class _MediaGalleryCardState extends OptimizedState<MediaGalleryCard> with Autom
         AttachmentDownloadController(
           attachment: attachment,
           onComplete: (file) {
+            if (!mounted) return;
             setState(() {
               controller = null;
               attachmentFile = file;
             });
-            if (attachment.mimeType?.contains("video") ?? false) {
-              getVideoPreview(file);
-            }
+            if (!kIsWeb) getBytes();
           },
           onError: () {
+            if (!mounted) return;
             setState(() {
               controller = null;
+              loading = false;
+              hasError = true;
             });
             showSnackbar("Error", "Failed to download attachment!");
           },
@@ -91,21 +106,44 @@ class _MediaGalleryCardState extends OptimizedState<MediaGalleryCard> with Autom
   }
 
   Future<void> getBytes() async {
+    final generation = ++_loadGeneration;
     final file = File(attachment.path);
-    if (await file.exists()) {
-      final bytes = await file.readAsBytes();
-      setState(() {
-        attachmentFile = PlatformFile(
-          name: attachment.transferName!,
-          path: attachment.path,
-          bytes: bytes,
-          size: attachment.totalBytes!,
-        );
-      });
-      if (attachment.mimeType?.contains("video") ?? false) {
-        getVideoPreview(attachmentFile);
-      }
+    if (!await file.exists()) {
+      if (mounted && generation == _loadGeneration) setState(() => loading = false);
+      return;
     }
+    if (!mounted) return;
+    setState(() { loading = true; hasError = false; });
+    try {
+      final original = await file.readAsBytes();
+      final preview = Platform.isLinux && attachment.mimeStart == 'image'
+          ? await as.loadAndGetProperties(attachment, actualPath: file.path)
+          : original;
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        attachmentFile = PlatformFile(name: attachment.transferName!, path: file.path,
+          bytes: original, size: attachment.totalBytes ?? original.length);
+        imagePreview = preview;
+        loading = false;
+        hasError = attachment.mimeStart == 'image' && (preview == null || preview.isEmpty);
+      });
+      if (attachment.mimeStart == 'video') getVideoPreview(attachmentFile);
+    } catch (_) {
+      if (mounted && generation == _loadGeneration) setState(() { loading = false; hasError = true; });
+    }
+  }
+
+  void retry() {
+    setState(() { loading = true; hasError = false; });
+    as.redownloadAttachment(attachment, onError: () {
+      if (mounted) setState(() { loading = false; hasError = true; });
+    });
+  }
+
+  @override
+  void dispose() {
+    _imageChanges?.cancel();
+    super.dispose();
   }
 
   Future<void> getVideoPreview(PlatformFile file) async {
@@ -158,6 +196,10 @@ class _MediaGalleryCardState extends OptimizedState<MediaGalleryCard> with Autom
           value: controller!.progress.value?.toDouble() ?? 0
         )),
       );
+    } else if (hasError) {
+      child = TextButton(onPressed: retry, child: const Text('Failed to display image. Retry'));
+    } else if (loading) {
+      child = const Center(child: CircularProgressIndicator());
     } else if (attachmentFile.bytes == null) {
       child = InkWell(
         onTap: downloadAttachment,
@@ -184,8 +226,8 @@ class _MediaGalleryCardState extends OptimizedState<MediaGalleryCard> with Autom
           ],
         ),
       );
-    } else if (attachment.mimeType?.startsWith("image") ?? false) {
-      child = ImageDisplay(attachment: attachment, image: attachmentFile.bytes!);
+    } else if (attachment.mimeStart == 'image') {
+      child = ImageDisplay(attachment: attachment, image: imagePreview ?? attachmentFile.bytes!, onRetry: retry);
       addPadding = false;
     } else if ((attachment.mimeType?.startsWith("video") ?? false) && !kIsDesktop && !kIsWeb) {
       if (videoPreview != null) {
@@ -228,11 +270,13 @@ class ImageDisplay extends StatelessWidget {
     required this.attachment,
     required this.image,
     this.duration,
+    this.onRetry,
   });
 
   final Attachment attachment;
   final Uint8List image;
   final Duration? duration;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -255,6 +299,8 @@ class ImageDisplay extends StatelessWidget {
               children: [
                 Image.memory(
                   image,
+                  errorBuilder: (_, __, ___) => TextButton(onPressed: onRetry,
+                    child: const Text('Failed to display image. Retry')),
                   fit: BoxFit.cover,
                   alignment: Alignment.center,
                   cacheWidth: ns.width(context) ~/ max(2, ns.width(context) ~/ 200) * 2,

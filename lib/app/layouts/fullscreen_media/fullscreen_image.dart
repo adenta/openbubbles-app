@@ -41,6 +41,8 @@ class _FullscreenImageState extends OptimizedState<FullscreenImage> with Automat
   bool showOverlay = true;
   bool hasError = false;
   Uint8List? bytes;
+  int _loadGeneration = 0;
+  StreamSubscription? _imageChanges;
 
   PlatformFile get file => widget.file;
   Attachment get attachment => widget.attachment;
@@ -50,52 +52,66 @@ class _FullscreenImageState extends OptimizedState<FullscreenImage> with Automat
   void initState() {
     super.initState();
     message?.handle = message?.getHandle();
+    _imageChanges = as.imageChanges.listen((event) {
+      if (event.guid != attachment.guid || !mounted) return;
+      _loadGeneration++;
+      setState(() { bytes = null; hasError = event.failed; });
+      if (event.ready) initBytes();
+    });
     updateObx(() {
       initBytes();
     });
   }
 
   Future<void> initBytes() async {
-    if (kIsWeb || file.path == null) {
-      if (attachment.mimeType?.contains("image/tif") ?? false) {
-        final receivePort = ReceivePort();
-        await Isolate.spawn(unsupportedToPngIsolate, IsolateData(file, receivePort.sendPort));
-        // Get the processed image from the isolate.
-        final image = await receivePort.first as Uint8List?;
-        bytes = image;
+    final generation = ++_loadGeneration;
+    Uint8List? loaded;
+    try {
+      if (kIsWeb || file.path == null) {
+        if (attachment.mimeType?.contains("image/tif") ?? false) {
+          final receivePort = ReceivePort();
+          try {
+            await Isolate.spawn(unsupportedToPngIsolate, IsolateData(file, receivePort.sendPort));
+            loaded = await receivePort.first as Uint8List?;
+          } finally {
+            receivePort.close();
+          }
+        } else {
+          loaded = file.bytes;
+        }
+      } else if (attachment.canCompress) {
+        loaded = await as.loadAndGetProperties(attachment, actualPath: file.path!);
       } else {
-        bytes = file.bytes;
+        loaded = await File(file.path!).readAsBytes();
       }
-    } else if (attachment.canCompress) {
-      bytes = await as.loadAndGetProperties(attachment, actualPath: file.path!);
-      // All other attachments can be held in memory as bytes
-    } else {
-      bytes = await File(file.path!).readAsBytes();
+    } catch (_) {
+      loaded = null;
     }
-    setState(() {});
+    if (!mounted || generation != _loadGeneration) return;
+    setState(() {
+      bytes = loaded;
+      hasError = loaded == null || loaded.isEmpty;
+    });
   }
 
   @override
   void dispose() {
+    _imageChanges?.cancel();
     controller.dispose();
     super.dispose();
   }
 
   void refreshAttachment() {
-    showSnackbar('In Progress', 'Redownloading attachment. Please wait...');
-    setState(() {
-      bytes = null;
-    });
-    as.redownloadAttachment(widget.attachment, onComplete: (file) {
-      setState(() {
-        bytes = file.bytes;
-      });
-    }, onError: () {
-      setState(() {
-        hasError = true;
-      });
+    setState(() { bytes = null; hasError = false; });
+    as.redownloadAttachment(attachment, onError: () {
+      if (mounted) setState(() => hasError = true);
     });
   }
+
+  Widget failure() => Center(child: TextButton(
+    onPressed: refreshAttachment,
+    child: const Text('Failed to display image. Retry'),
+  ));
 
   @override
   Widget build(BuildContext context) {
@@ -239,12 +255,12 @@ class _FullscreenImageState extends OptimizedState<FullscreenImage> with Automat
                         }
                       },
                       errorBuilder: (context, object, stacktrace) =>
-                          Center(child: Text("Failed to display image", style: context.theme.textTheme.bodyLarge)),
+                          failure(),
                       filterQuality: FilterQuality.high,
                     ),
                   )
                 : hasError
-                    ? Center(child: Text("Failed to load image", style: context.theme.textTheme.bodyLarge))
+                    ? failure()
                     : Center(
                         child: Padding(
                         padding: EdgeInsets.only(bottom: widget.showInteractions ? 60.0 : 0),

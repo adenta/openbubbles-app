@@ -64,7 +64,7 @@ class GetChatAttachments extends AsyncTask<List<dynamic>, List<Attachment>> {
 
       /// Match the attachments to their messages
       for (Message m in messages) {
-        m.attachments = List<Attachment>.from(m.dbAttachments.where((element) => element.mimeType != null));
+        m.attachments = List<Attachment>.from(m.dbAttachments.where((element) => element.mimeType != null || element.isLinuxHeic));
         actualAttachments.addAll((m.attachments).map((e) => e!));
       }
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:bluebubbles/helpers/files/heic_file.dart';
 
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/database/database.dart';
@@ -315,7 +316,19 @@ class Attachment {
 
   double get aspectRatio => hasValidSize ? (_isPortrait && height! < width! ?  (height! / width!).abs() : (width! / height!).abs()) : 0.78;
 
-  String? get mimeStart => mimeType?.split("/").first;
+  bool get isLinuxHeic {
+    if (!Platform.isLinux) return false;
+    if (HeicFile.matches(mimeType, transferName)) return true;
+    if (!HeicFile.isGeneric(mimeType)) return false;
+    try {
+      return HeicFile.matchesFile(mimeType, transferName, sourcePath ?? path);
+    } catch (_) {
+      // Background database workers may not have initialized app directories.
+      return false;
+    }
+  }
+
+  String? get mimeStart => isLinuxHeic ? 'image' : mimeType?.split("/").first;
 
   static String get baseDirectory => "${fs.appDocDir.path}/attachments";
 
@@ -346,7 +359,7 @@ class Attachment {
 
   Future<bool> get existsOnDiskAsync async => await File(path).exists();
 
-  bool get canCompress => mimeStart == "image" && !mimeType!.contains("gif");
+  bool get canCompress => mimeStart == "image" && !(mimeType?.contains("gif") ?? false);
 
   static Attachment merge(Attachment attachment1, Attachment attachment2) {
     attachment1.id ??= attachment2.id;
@@ -386,6 +399,7 @@ class Attachment {
   };
 
   bool  get _isPortrait {
+    if (Platform.isLinux && metadata?['heic_display_orientation_applied'] == true) return false;
     if (metadata?['orientation'] == '1') return true;
     if (metadata?['orientation'] == 1) return true;
     if (metadata?['orientation'] == 'portrait') return true;

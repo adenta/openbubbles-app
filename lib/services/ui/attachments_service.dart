@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 
@@ -5,6 +6,8 @@ import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/utils/logger/logger.dart';
+import 'package:bluebubbles/helpers/files/heic_file.dart';
+import 'package:bluebubbles/services/ui/linux_heic_decoder.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:exif/exif.dart';
 import 'package:file_picker/file_picker.dart' hide PlatformFile;
@@ -28,6 +31,19 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 AttachmentsService as = Get.isRegistered<AttachmentsService>() ? Get.find<AttachmentsService>() : Get.put(AttachmentsService());
 
 class AttachmentsService extends GetxService {
+  AttachmentsService({LinuxHeicDecoder? heicDecoder}) : _providedHeicDecoder = heicDecoder;
+  final LinuxHeicDecoder? _providedHeicDecoder;
+  late final _heicDecoder = _providedHeicDecoder ?? LinuxHeicDecoder();
+  final _imageChanges = StreamController<({String? guid, bool ready, bool failed})>.broadcast(sync: true);
+  Stream<({String? guid, bool ready, bool failed})> get imageChanges => _imageChanges.stream;
+
+  void imageDownloadComplete(Attachment attachment) {
+    _imageChanges.add((guid: attachment.guid, ready: true, failed: false));
+  }
+
+  void imageDownloadFailed(Attachment attachment) {
+    _imageChanges.add((guid: attachment.guid, ready: false, failed: true));
+  }
 
   dynamic getContent(Attachment attachment, {String? path, bool? autoDownload, Function(PlatformFile)? onComplete, bool forExtension = false}) {
     if ((attachment.guid?.startsWith("temp") ?? false) && !forExtension) {
@@ -283,18 +299,22 @@ class AttachmentsService extends GetxService {
   }
 
   Future<void> redownloadAttachment(Attachment attachment, {Function(PlatformFile)? onComplete, Function()? onError}) async {
+    _imageChanges.add((guid: attachment.guid, ready: false, failed: false));
     if (!kIsWeb) {
-      final file = File(attachment.path);
-      final pngFile = File(attachment.convertedPath);
-      final thumbnail = File("${attachment.path}.thumbnail");
-      final pngThumbnail = File("${attachment.convertedPath}.thumbnail");
-
       try {
-        await file.delete();
-        await pngFile.delete();
-        await thumbnail.delete();
-        await pngThumbnail.delete();
-      } catch(_) {}
+        if (Platform.isLinux) await _heicDecoder.invalidate(attachment.path);
+        for (final path in [attachment.path, attachment.convertedPath,
+          '${attachment.path}.thumbnail', '${attachment.convertedPath}.thumbnail']) {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        }
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+      } catch (_) {
+        imageDownloadFailed(attachment);
+        onError?.call();
+        return;
+      }
     }
 
     Get.put(AttachmentDownloadController(
@@ -337,13 +357,30 @@ class AttachmentsService extends GetxService {
   }
 
   Future<Uint8List?> loadAndGetProperties(Attachment attachment, {bool onlyFetchData = false, String? actualPath, bool isPreview = false}) async {
-    if (kIsWeb || attachment.mimeType == null || !["image", "video"].contains(attachment.mimeStart)) return null;
-
+    if (kIsWeb) return null;
     final filePath = actualPath ?? attachment.path;
-    File originalFile = File(filePath);
-    if (kIsDesktop) {
-      await originalFile.create(recursive: true);
+    if (Platform.isLinux && HeicFile.matchesFile(attachment.mimeType, attachment.transferName, filePath)) {
+      final Uint8List bytes;
+      try {
+        bytes = await _heicDecoder.load(filePath);
+      } on HeicDecodeException catch (error) {
+        Logger.error('HEIC display conversion failed: ${error.reason}');
+        rethrow;
+      }
+      if (!onlyFetchData) {
+        final size = await getImageSizing('$filePath.png', attachment);
+        if (size.width > 0 && size.height > 0) {
+          attachment.width = size.width.toInt();
+          attachment.height = size.height.toInt();
+          attachment.metadata ??= {};
+          attachment.metadata!['heic_display_orientation_applied'] = true;
+          attachment.save(null);
+        }
+      }
+      return bytes;
     }
+    if (attachment.mimeType == null || !["image", "video"].contains(attachment.mimeStart)) return null;
+    File originalFile = File(filePath);
 
     // Handle getting heic and tiff images
     if (attachment.mimeType!.contains('image/hei') && !kIsDesktop) {

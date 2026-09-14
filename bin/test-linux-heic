@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/.."
+mkdir -p build/heic-tests/fixtures
+c++ -std=c++14 -Wall -Wextra -Werror linux/heic_decode.cc \
+  -o build/heic-tests/openbubbles-heic-decode $(pkg-config --cflags --libs libheif libpng)
+c++ -std=c++14 -Wall -Wextra -Werror test/native/heic_fixtures.cc \
+  -o build/heic-tests/generate-fixtures $(pkg-config --cflags --libs libheif)
+build/heic-tests/generate-fixtures build/heic-tests/fixtures
+mise exec flutter@3.24.0 -- flutter test --no-pub --reporter expanded test/heic_file_test.dart test/linux_heic_decoder_test.dart test/serial_work_queue_test.dart test/attachment_image_loading_test.dart

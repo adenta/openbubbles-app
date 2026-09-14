@@ -27,7 +27,7 @@ On Arch, build tools and libraries are installed with:
 
 ```sh
 sudo -n pacman -S --needed base-devel clang cmake ninja nodejs curl \
-  gtk3 json-glib libayatana-appindicator webkit2gtk-4.1 libsecret mpv libnotify
+  gtk3 json-glib libayatana-appindicator webkit2gtk-4.1 libsecret mpv libnotify libheif libde265 libpng
 ```
 
 Reuse a managed Node installation instead of installing `nodejs` when one is
