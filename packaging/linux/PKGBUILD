@@ -6,7 +6,7 @@ pkgdesc='OpenBubbles development app with the pinned official messaging engine'
 arch=('x86_64')
 url='https://github.com/OpenBubbles/openbubbles-app'
 license=('Apache-2.0')
-depends=('gtk3' 'libayatana-appindicator' 'webkit2gtk-4.1' 'libsecret' 'mpv' 'libnotify')
+depends=('gtk3' 'json-glib' 'libayatana-appindicator' 'webkit2gtk-4.1' 'libsecret' 'mpv' 'libnotify')
 options=('!strip' '!debug')
 package() {
   install -dm755 "$pkgdir/opt/openbubbles-dev"
