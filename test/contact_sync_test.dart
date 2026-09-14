@@ -87,14 +87,22 @@ const card =
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('failure summaries retain safe categories without private exception details', () {
-    expect(contactSyncFailureSummary(ContactSyncError(ContactSyncFailure.cardDownload, 403)),
+  test(
+      'failure summaries retain safe categories without private exception details',
+      () {
+    expect(
+        contactSyncFailureSummary(
+            ContactSyncError(ContactSyncFailure.cardDownload, 403)),
         'cardDownload; HTTP 403');
-    expect(contactSyncFailureSummary(StateError('private-contact-url')), 'StateError');
-    expect(contactSyncFailureSummary(DioException(
-      requestOptions: RequestOptions(path: 'https://private.invalid/contact'),
-      message: 'private-contact-card',
-      type: DioExceptionType.badResponse)), 'network badResponse; HTTP 0');
+    expect(contactSyncFailureSummary(StateError('private-contact-url')),
+        'StateError');
+    expect(
+        contactSyncFailureSummary(DioException(
+            requestOptions:
+                RequestOptions(path: 'https://private.invalid/contact'),
+            message: 'private-contact-card',
+            type: DioExceptionType.badResponse)),
+        'network badResponse; HTTP 0');
   });
   late Directory scratch;
   late TestContacts service;
@@ -160,7 +168,9 @@ void main() {
   });
 
   test('new message handles match the newly imported in-memory list', () async {
-    client.fetch = () async => [delta([upsert('first')])];
+    client.fetch = () async => [
+          delta([upsert('first')])
+        ];
     await service.refreshContacts();
     final h = Handle(address: 'first@example.invalid').save();
     expect(h.contactRelation.targetId, service.contacts.single.dbId);
@@ -347,21 +357,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('visible avatar refreshes its cached handle after import and deletion', (tester) async {
+  testWidgets(
+      'visible avatar refreshes its cached handle after import and deletion',
+      (tester) async {
     final id = Database.handles.put(Handle(address: 'first@example.invalid'));
     final cached = Database.handles.get(id)!;
     await tester.pumpWidget(AdaptiveTheme(
-      light: ThemeData.light(), dark: ThemeData.dark(), initial: AdaptiveThemeMode.light,
-      builder: (light, dark) => MaterialApp(theme: light, darkTheme: dark,
-        home: Scaffold(body: ContactAvatarWidget(handle: cached, editable: false, size: 40))),
+      light: ThemeData.light(),
+      dark: ThemeData.dark(),
+      initial: AdaptiveThemeMode.light,
+      builder: (light, dark) => MaterialApp(
+          theme: light,
+          darkTheme: dark,
+          home: Scaffold(
+              body: ContactAvatarWidget(
+                  handle: cached, editable: false, size: 40))),
     ));
-    client.fetch = () async => [delta([upsert('first', name: 'Synthetic Person')])];
+    client.fetch = () async => [
+          delta([upsert('first', name: 'Synthetic Person')])
+        ];
     await tester.runAsync(() => service.refreshContacts());
     await tester.pump();
     expect(cached.contact!.displayName, 'Synthetic Person');
-    final avatarText = find.byKey(const Key('first@example.invalid-avatar-text'));
+    final avatarText =
+        find.byKey(const Key('first@example.invalid-avatar-text'));
     expect(tester.widget<Text>(avatarText).data, anyOf('S', 'SP'));
-    client.fetch = () async => [delta([ContactChange.deleted(href: href('first'))])];
+    client.fetch = () async => [
+          delta([ContactChange.deleted(href: href('first'))])
+        ];
     await tester.runAsync(() => service.refreshContacts());
     await tester.pump();
     expect(cached.contact, isNull);
@@ -373,37 +396,52 @@ void main() {
   });
 
   for (final google in [false, true]) {
-    test('collection entries are not downloaded as cards (Google: $google)', () async {
-      final target = google
-          ? AddressBook(url: Uri.parse('https://www.googleapis.com/carddav/book/'))
-          : book;
-      final gets = <Uri>[];
-      final dio = Dio();
-      dio.interceptors.add(InterceptorsWrapper(onRequest: (o, handler) {
-        final String data;
-        if (o.method == 'GET') {
-          gets.add(o.uri);
-          // The collection rejects GET, as opposed to a real contact resource.
-          handler.resolve(Response(requestOptions: o,
-              data: o.uri == target.url ? '' : card,
-              statusCode: o.uri == target.url ? 400 : 200));
-          return;
-        }
-        data = '<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">'
-            '<d:sync-token>next</d:sync-token>'
-            '<d:response><d:href>${target.url.path}</d:href><d:propstat><d:prop><cs:getctag>new</cs:getctag></d:prop>'
-            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>'
-            '<d:response><d:href>${target.url.path}person.vcf</d:href><d:propstat><d:prop><d:getetag>one</d:getetag></d:prop>'
-            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>';
-        handler.resolve(Response(requestOptions: o, data: data, statusCode: 207));
-      }));
-      final actual = CardDavClient(principalUrl: target.url, state: state,
-          dio: dio, authHeadersProvider: () async => {});
-      final result = await actual.syncAddressBook(target);
-      expect(gets, [target.url.resolve('person.vcf')]);
-      expect(result.changes.single.contact!.id, cardDavContactId(gets.single));
-      expect(state.saved, isEmpty);
-    });
+    for (final trailingSlash in [false, true]) {
+      test(
+          'collection entries are not downloaded as cards (Google: $google, slash: $trailingSlash)',
+          () async {
+        final target = google
+            ? AddressBook(
+                url: Uri.parse('https://www.googleapis.com/carddav/book/'))
+            : book;
+        final collectionPath = trailingSlash
+            ? target.url.path
+            : target.url.path.replaceFirst(RegExp(r'/$'), '');
+        final gets = <Uri>[];
+        final dio = Dio();
+        dio.interceptors.add(InterceptorsWrapper(onRequest: (o, handler) {
+          final String data;
+          if (o.method == 'GET') {
+            gets.add(o.uri);
+            // The collection rejects GET, as opposed to a real contact resource.
+            handler.resolve(Response(
+                requestOptions: o,
+                data: !o.uri.path.endsWith('.vcf') ? '' : card,
+                statusCode: !o.uri.path.endsWith('.vcf') ? 400 : 200));
+            return;
+          }
+          data =
+              '<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">'
+              '<d:sync-token>next</d:sync-token>'
+              '<d:response><d:href>$collectionPath</d:href><d:propstat><d:prop><cs:getctag>new</cs:getctag></d:prop>'
+              '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>'
+              '<d:response><d:href>${target.url.path}person.vcf</d:href><d:propstat><d:prop><d:getetag>one</d:getetag></d:prop>'
+              '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>';
+          handler.resolve(
+              Response(requestOptions: o, data: data, statusCode: 207));
+        }));
+        final actual = CardDavClient(
+            principalUrl: target.url,
+            state: state,
+            dio: dio,
+            authHeadersProvider: () async => {});
+        final result = await actual.syncAddressBook(target);
+        expect(gets, [target.url.resolve('person.vcf')]);
+        expect(
+            result.changes.single.contact!.id, cardDavContactId(gets.single));
+        expect(state.saved, isEmpty);
+      });
+    }
   }
 
   for (final status in [200, 403, 500, 404]) {

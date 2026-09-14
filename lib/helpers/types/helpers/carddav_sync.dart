@@ -489,7 +489,7 @@ class CardDavClient {
 
       // A collection response describes the book, not a downloadable vCard.
       // Keep non-success collection statuses fatal (e.g. a truncated REPORT).
-      if (href.normalizePath() == addressBookUrl.normalizePath() && !deleted) continue;
+      if (_isBookResponse(href, addressBookUrl) && !deleted) continue;
 
       String? etag;
       if (!deleted) {
@@ -504,6 +504,15 @@ class CardDavClient {
     }
 
     return _SyncCollectionResult(newSyncToken: newToken.isEmpty ? null : newToken, items: items);
+  }
+
+  bool _isBookResponse(Uri href, Uri book) {
+    Uri collection(Uri uri) {
+      final normalized = uri.normalizePath();
+      return normalized.replace(path: normalized.path.replaceFirst(RegExp(r'/$'), ''));
+    }
+    // iCloud can list the book itself without its discovery URL's trailing slash.
+    return collection(href) == collection(book);
   }
 
   bool _isGoogleCardDav(Uri addressBookUrl) {
@@ -535,7 +544,7 @@ class CardDavClient {
       final hrefText = r.getElement('href', namespace: 'DAV:')?.innerText.trim();
       if (hrefText == null || hrefText.isEmpty) continue;
       final href = _resolve(addressBookUrl, hrefText);
-      if (href.normalizePath() == addressBookUrl.normalizePath()) continue;
+      if (_isBookResponse(href, addressBookUrl)) continue;
       final etag = r
           .findAllElements('getetag', namespace: 'DAV:')
           .map((e) => e.innerText.trim())
