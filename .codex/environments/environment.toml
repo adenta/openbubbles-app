@@ -1,0 +1,5 @@
+version = 1
+name = "openbubbles"
+
+[setup]
+script = "./bin/setup-worktree"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/.."
+
+if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
+  echo 'Worktree setup requires x86_64 Linux and the official Linux engine.' >&2
+  exit 1
+fi
+for cmd in git mise node curl tar objdump cmp; do
+  command -v "$cmd" >/dev/null || { echo "Missing setup dependency: $cmd" >&2; exit 1; }
+done
+if ! mise where flutter@3.24.0 >/dev/null; then
+  echo 'Flutter 3.24.0 must already be installed in Mise. Setup does not install toolchains.' >&2
+  exit 1
+fi
+
+# Match the package build's public configuration policy before downloading anything.
+if [[ -s .env ]] && ! cmp -s .env packaging/linux/public.env; then
+  echo 'Refusing to overwrite or package a private .env.' >&2
+  exit 1
+fi
+git submodule update --init --recursive telephony_plus
+cp packaging/linux/public.env .env
+mise exec flutter@3.24.0 -- flutter --suppress-analytics pub get --enforce-lockfile
+node bin/official-engine.mjs prepare
+
+echo 'Worktree ready. Build explicitly with bin/build-linux-dev PACKAGE_RELEASE.'

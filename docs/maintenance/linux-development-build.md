@@ -10,7 +10,8 @@ is needed to build or open the setup screen; messaging needs separate acceptance
 The base is `v1.15.0+205`, commit
 `852c9910f456492f7f840ac4ff2a8bad7a1ee8c8`, on
 `codex/linux-official-engine`. The original research remains on
-`codex/linux-build-proof`. Work in `/home/agent/workspaces/openbubbles`.
+`codex/linux-build-proof`. Use `/home/agent/workspaces/openbubbles` for integration
+and installation testing, and separate worktrees for independent coding tasks.
 The old workspace path is a temporary symlink for the existing task; retire it
 once the desktop project has been repointed and no active task uses that path.
 
@@ -47,6 +48,68 @@ events save the window size after a short debounce. The Linux runner reads those
 dimensions before plugins can show the GTK window, using JSON-GLib. This avoids
 depending on later resize requests being honored by a Wayland compositor.
 It starts with the app's custom frame instead of adding a second GTK header.
+
+## Worktrees
+
+In Codex, start a new task in **Worktree** mode, select
+`codex/linux-official-engine` as the starting branch, and select the
+**openbubbles** local environment. Its checked-in setup configuration runs
+`./bin/setup-worktree` automatically. The setup script and configuration must
+be committed on the selected starting branch so that new worktrees inherit them.
+When keeping a task's changes, create a branch with a `codex/` name in its
+worktree before committing and integrating them.
+
+Setup requires x86_64 Linux, the existing Mise installation of Flutter 3.24.0,
+Git, Node, curl, tar, objdump, and cmp. It initializes the pinned `telephony_plus`
+submodule, writes the public `.env` (refusing to overwrite private configuration),
+resolves Flutter dependencies with the lockfile enforced, and downloads and
+verifies the pinned official engine. It is safe to rerun. It does not install
+toolchains, compile, package, install, or launch the app. A failed setup prints
+the failing command's error; resolve that dependency or download failure and
+rerun the script from the same checkout.
+
+For an equivalent terminal workflow on Grace:
+
+```sh
+cd /home/agent/workspaces/openbubbles
+git worktree add -b codex/example-fix /home/agent/workspaces/openbubbles-example-fix codex/linux-official-engine
+cd /home/agent/workspaces/openbubbles-example-fix
+./bin/setup-worktree
+```
+
+Choose a unique task branch and directory each time. Each checkout owns its
+generated Flutter files, engine download, and build outputs. Normal Mise and
+package-download caches are reused; do not copy or symlink another checkout's
+`.dart_tool`, `build`, or private configuration. A new checkout will have a cold
+build and can use several gigabytes after compilation. Git worktrees isolate
+source changes; they do not isolate the installed app or its runtime data.
+
+Build explicitly from the task's checkout with `bin/build-linux-dev PACKAGE_RELEASE`
+and run `node --test bin/official-engine.test.mjs`. The build command sets
+`OPENBUBBLES_ENGINE_LIBRARY` for CMake; setup does not persist shell exports, so
+a bare `flutter build linux` is not the supported build command.
+
+Commit completed changes on the task branch. With no unfinished tracked edits
+in the integration checkout, merge one completed task at a time there using
+`git merge codex/example-fix`, resolve any conflicts, and validate the combined
+result. All packages use the same `openbubbles-dev` identity and development
+data paths: install and test one package at a time using the procedure below.
+
+After integration, use Codex's worktree cleanup for managed worktrees. For the
+terminal-created example, first inspect `git status --short` in both the worktree
+and `telephony_plus` and preserve any uncommitted or untracked work. Once all
+source changes are committed and merged, deinitialize the clean submodule and
+remove the worktree from the integration checkout:
+
+```sh
+git -C /home/agent/workspaces/openbubbles-example-fix submodule deinit telephony_plus
+cd /home/agent/workspaces/openbubbles
+git worktree remove /home/agent/workspaces/openbubbles-example-fix
+git branch -d codex/example-fix
+```
+
+Worktree removal also discards ignored local build outputs; preserve any package
+or receipt you need first. Do not force removal to bypass uncommitted work.
 
 ## Build
 
