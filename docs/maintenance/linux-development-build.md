@@ -99,12 +99,14 @@ After integration, use Codex's worktree cleanup for managed worktrees. For the
 terminal-created example, first inspect `git status --short` in both the worktree
 and `telephony_plus` and preserve any uncommitted or untracked work. Once all
 source changes are committed and merged, deinitialize the clean submodule and
-remove the worktree from the integration checkout:
+remove the worktree from the integration checkout. Git requires `--force` for
+worktrees with submodule metadata even after deinitialization; use it only after
+checking that both checkouts have no source changes to preserve:
 
 ```sh
 git -C /home/agent/workspaces/openbubbles-example-fix submodule deinit telephony_plus
 cd /home/agent/workspaces/openbubbles
-git worktree remove /home/agent/workspaces/openbubbles-example-fix
+git worktree remove --force /home/agent/workspaces/openbubbles-example-fix
 git branch -d codex/example-fix
 ```
 
