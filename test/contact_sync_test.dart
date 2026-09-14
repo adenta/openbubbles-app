@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:adaptive_theme/adaptive_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dio/dio.dart';
 import 'package:bluebubbles/database/database.dart';
@@ -11,6 +12,7 @@ import 'package:bluebubbles/services/backend/settings/settings_service.dart';
 import 'package:bluebubbles/services/ui/chat/chat_lifecycle_manager.dart';
 import 'package:bluebubbles/services/backend_ui_interop/event_dispatcher.dart';
 import 'package:bluebubbles/app/layouts/contact_selector_view/contact_selector_view.dart';
+import 'package:bluebubbles/app/components/avatars/contact_avatar_widget.dart';
 
 class ScratchState implements CardDavStateStore {
   final saved = <String, AddressBook>{};
@@ -330,6 +332,31 @@ void main() {
     await tester.pump();
     expect(find.text('Synthetic Person'), findsNothing);
     expect(find.text('syn'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    service.completeContactsRefresh([], reloadUI: [[], []]);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('visible avatar refreshes its cached handle after import and deletion', (tester) async {
+    final id = Database.handles.put(Handle(address: 'first@example.invalid'));
+    final cached = Database.handles.get(id)!;
+    await tester.pumpWidget(AdaptiveTheme(
+      light: ThemeData.light(), dark: ThemeData.dark(), initial: AdaptiveThemeMode.light,
+      builder: (light, dark) => MaterialApp(theme: light, darkTheme: dark,
+        home: Scaffold(body: ContactAvatarWidget(handle: cached, editable: false, size: 40))),
+    ));
+    client.fetch = () async => [delta([upsert('first', name: 'Synthetic Person')])];
+    await tester.runAsync(() => service.refreshContacts());
+    await tester.pump();
+    expect(cached.contact!.displayName, 'Synthetic Person');
+    final avatarText = find.byKey(const Key('first@example.invalid-avatar-text'));
+    expect(tester.widget<Text>(avatarText).data, anyOf('S', 'SP'));
+    client.fetch = () async => [delta([ContactChange.deleted(href: href('first'))])];
+    await tester.runAsync(() => service.refreshContacts());
+    await tester.pump();
+    expect(cached.contact, isNull);
+    expect(tester.widget<Text>(avatarText).data, 'F');
     await tester.pumpWidget(const SizedBox());
     service.completeContactsRefresh([], reloadUI: [[], []]);
     await tester.pump();

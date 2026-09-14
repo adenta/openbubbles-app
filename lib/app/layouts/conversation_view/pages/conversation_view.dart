@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/header/cupertino_header.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/header/material_header.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/text_field/conversation_text_field.dart';
@@ -35,6 +37,7 @@ class ConversationView extends StatefulWidget {
 }
 
 class ConversationViewState extends OptimizedState<ConversationView> {
+  StreamSubscription? _contactsSubscription;
   late final ConversationViewController controller = cvc(chat, tag: widget.customService?.tag);
 
   Chat get chat => widget.chat;
@@ -47,6 +50,14 @@ class ConversationViewState extends OptimizedState<ConversationView> {
     controller.fromChatCreator = widget.fromChatCreator;
     cm.setActiveChatSync(chat);
     cm.activeChat!.controller = controller;
+    _contactsSubscription = eventDispatcher.stream.listen((event) {
+      if (kIsWeb || event.item1 != 'update-contacts' || !mounted) return;
+      final changed = event.item2 as List<List<int>>;
+      if (!controller.chat.participants.any((h) =>
+          changed.first.contains(h.contactRelation.targetId) || changed.last.contains(h.id))) return;
+      ChatLifecycleManager.reloadContacts(controller.chat, changed);
+      setState(() {});
+    });
     Logger.debug("Conversation View initialized for ${chat.guid}");
 
     if (widget.onInit != null) {
@@ -58,6 +69,7 @@ class ConversationViewState extends OptimizedState<ConversationView> {
 
   @override
   void dispose() {
+    _contactsSubscription?.cancel();
     controller.saveReplyToMessageState(); // P8bda
     super.dispose();
   }

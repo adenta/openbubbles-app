@@ -282,6 +282,7 @@ class ChatTitle extends CustomStateful<ConversationTileController> {
 class _ChatTitleState extends CustomState<ChatTitle, void, ConversationTileController> {
   String title = "Unknown";
   StreamSubscription? sub;
+  StreamSubscription? contactsSub;
   String? cachedDisplayName = "";
   List<Handle> cachedParticipants = [];
 
@@ -320,21 +321,14 @@ class _ChatTitleState extends CustomState<ChatTitle, void, ConversationTileContr
         });
       });
       // listen for contacts update (if tile is active, we can update it)
-      eventDispatcher.stream.listen((event) {
+      contactsSub = eventDispatcher.stream.listen((event) {
         if (event.item1 != 'update-contacts') return;
         if (event.item2.isNotEmpty) {
-          bool changed = false;
-          for (Handle h in controller.chat.participants) {
-            if (event.item2.first.contains(h.contactRelation.targetId)) {
-              changed = true;
-              h.contactRelation.target = Database.contacts.get(h.contactRelation.targetId);
-            }
-            if (event.item2.last.contains(h.id)) {
-              changed = true;
-              h = Database.handles.get(h.id!)!;
-            }
-          }
+          final changed = controller.chat.participants.any((h) =>
+              event.item2.first.contains(h.contactRelation.targetId) ||
+              event.item2.last.contains(h.id));
           if (changed) {
+            ChatLifecycleManager.reloadContacts(controller.chat, event.item2);
             final newTitle = controller.chat.getTitle();
             if (newTitle != title) {
               setState(() {
@@ -367,6 +361,7 @@ class _ChatTitleState extends CustomState<ChatTitle, void, ConversationTileContr
   @override
   void dispose() {
     if (!kIsWeb) sub?.cancel();
+    contactsSub?.cancel();
     super.dispose();
   }
 

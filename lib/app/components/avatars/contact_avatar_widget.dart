@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'package:bluebubbles/database/database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/database/models.dart';
@@ -35,18 +38,38 @@ class ContactAvatarWidget extends StatefulWidget {
 }
 
 class _ContactAvatarWidgetState extends OptimizedState<ContactAvatarWidget> {
+  StreamSubscription? _contactSubscription;
   Contact? get contact => widget.contact ?? widget.handle?.contact;
   String get keyPrefix => widget.handle?.address ?? randomString(8);
 
   @override
   void initState() {
     super.initState();
-    eventDispatcher.stream.listen((event) {
+    _contactSubscription = eventDispatcher.stream.listen((event) {
+      if (!mounted) return;
+      if (event.item1 == 'update-contacts' && !kIsWeb && widget.handle != null) {
+        final h = widget.handle!;
+        final changed = event.item2 as List<List<int>>;
+        if (changed.last.contains(h.id)) {
+          h.contactRelation.target = Database.handles.get(h.id!)?.contact;
+          setState(() {});
+        } else if (changed.first.contains(h.contactRelation.targetId)) {
+          h.contactRelation.target = Database.contacts.get(h.contactRelation.targetId);
+          setState(() {});
+        }
+        return;
+      }
       if (event.item1 != 'refresh-avatar') return;
       if (event.item2[0] != widget.handle?.address) return;
       widget.handle?.color = event.item2[1];
       setState(() {});
     });
+  }
+
+  @override
+  void dispose() {
+    _contactSubscription?.cancel();
+    super.dispose();
   }
 
   void onAvatarTap() async {
