@@ -372,6 +372,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final google in [false, true]) {
+    test('collection entries are not downloaded as cards (Google: $google)', () async {
+      final target = google
+          ? AddressBook(url: Uri.parse('https://www.googleapis.com/carddav/book/'))
+          : book;
+      final gets = <Uri>[];
+      final dio = Dio();
+      dio.interceptors.add(InterceptorsWrapper(onRequest: (o, handler) {
+        final String data;
+        if (o.method == 'GET') {
+          gets.add(o.uri);
+          // The collection rejects GET, as opposed to a real contact resource.
+          handler.resolve(Response(requestOptions: o,
+              data: o.uri == target.url ? '' : card,
+              statusCode: o.uri == target.url ? 400 : 200));
+          return;
+        }
+        data = '<d:multistatus xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">'
+            '<d:sync-token>next</d:sync-token>'
+            '<d:response><d:href>${target.url.path}</d:href><d:propstat><d:prop><cs:getctag>new</cs:getctag></d:prop>'
+            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>'
+            '<d:response><d:href>${target.url.path}person.vcf</d:href><d:propstat><d:prop><d:getetag>one</d:getetag></d:prop>'
+            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>';
+        handler.resolve(Response(requestOptions: o, data: data, statusCode: 207));
+      }));
+      final actual = CardDavClient(principalUrl: target.url, state: state,
+          dio: dio, authHeadersProvider: () async => {});
+      final result = await actual.syncAddressBook(target);
+      expect(gets, [target.url.resolve('person.vcf')]);
+      expect(result.changes.single.contact!.id, cardDavContactId(gets.single));
+      expect(state.saved, isEmpty);
+    });
+  }
+
   for (final status in [200, 403, 500, 404]) {
     test(
         'actual CardDAV client handles vCard HTTP $status without premature checkpoints',

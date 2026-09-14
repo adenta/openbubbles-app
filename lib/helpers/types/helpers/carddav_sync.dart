@@ -487,6 +487,10 @@ class CardDavClient {
         throw ContactSyncError(ContactSyncFailure.resourceStatus);
       }
 
+      // A collection response describes the book, not a downloadable vCard.
+      // Keep non-success collection statuses fatal (e.g. a truncated REPORT).
+      if (href.normalizePath() == addressBookUrl.normalizePath() && !deleted) continue;
+
       String? etag;
       if (!deleted) {
         etag = r
@@ -531,6 +535,7 @@ class CardDavClient {
       final hrefText = r.getElement('href', namespace: 'DAV:')?.innerText.trim();
       if (hrefText == null || hrefText.isEmpty) continue;
       final href = _resolve(addressBookUrl, hrefText);
+      if (href.normalizePath() == addressBookUrl.normalizePath()) continue;
       final etag = r
           .findAllElements('getetag', namespace: 'DAV:')
           .map((e) => e.innerText.trim())

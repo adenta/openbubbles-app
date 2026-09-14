@@ -56,11 +56,12 @@ class ContactsService extends GetxService {
 
   Future<List<List<int>>> refreshContacts() => _refreshLock.synchronized(() async {
     if ((kIsDesktop || kIsWeb) && usingRustPush) {
+      final watch = Stopwatch()..start();
       try {
         return await _refreshCardDavContacts();
       } catch (error) {
         // Network exceptions can contain credentials, resource URLs and vCards.
-        Logger.warn('Contact sync failed (${contactSyncFailureSummary(error)}); retry is safe');
+        Logger.warn('Contact sync failed (${contactSyncFailureSummary(error)}; ${watch.elapsedMilliseconds} ms); retry is safe');
         throw StateError('Contact sync failed; please retry');
       }
     }
@@ -379,6 +380,7 @@ class ContactsService extends GetxService {
     final watch = Stopwatch()..start();
     final client = await createCardDavClient();
     final results = client == null ? <CardDavSyncResult>[] : await client.syncAllAddressBooks();
+    final previousIds = (kIsWeb ? contacts : Contact.getContacts()).map((c) => kIsWeb ? c.id : c.dbId).toSet();
     final changed = applyCardDavChanges(results);
     // Publish committed records even if saving a checkpoint subsequently fails.
     completeContactsRefresh(kIsWeb ? contacts : Contact.getContacts(), reloadUI: changed);
@@ -393,8 +395,12 @@ class ContactsService extends GetxService {
         await client.state.saveCheckpoint(result.book);
       }
     }
+    final savedIds = contacts.map((c) => kIsWeb ? c.id : c.dbId).toSet();
+    final inserted = savedIds.difference(previousIds).length;
+    final deleted = previousIds.difference(savedIds).length;
+    final updated = changed.first.where((id) => previousIds.contains(id) && savedIds.contains(id)).length;
     Logger.info('Contact sync ${client == null ? "unavailable; using cache" : "completed"}: '
-        '${contacts.length} contacts, ${changed.first.length} changed, '
+        '${contacts.length} contacts, $inserted inserted, $updated updated, $deleted deleted, '
         '${changed.last.length} relinked, ${watch.elapsedMilliseconds} ms');
     return changed;
   }
