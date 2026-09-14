@@ -39,7 +39,11 @@ The release's dotenv loader rejects a zero-byte file. The build copies the
 checked-in `packaging/linux/public.env`, with optional integration keys blank,
 and refuses to overwrite or package any other nonempty `.env`.
 Linux skips unsupported Mixpanel initialization, and Android billing is created
-only when used. These are desktop startup fixes, without native API changes.
+only when used; Linux does not query Google Play purchases. The unsupported
+native privacy-overlay unlock call is disabled on Linux, while the existing
+authentication checks remain in place. These are desktop startup fixes, without
+native API changes. The tray gets a stable development ID, and Linux resize
+events save the window size after a short debounce.
 
 ## Build
 

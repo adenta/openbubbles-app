@@ -333,6 +333,8 @@ class Main extends StatelessWidget {
           top: false,
           bottom: false,
           child: SecureApplication(
+            // The native privacy-overlay plugin has no Linux implementation.
+            autoUnlockNative: !Platform.isLinux,
             child: Builder(
               builder: (context) {
                 if (ss.canAuthenticate && (!ls.isAlive || !StartupTasks.uiReady.isCompleted)) {
